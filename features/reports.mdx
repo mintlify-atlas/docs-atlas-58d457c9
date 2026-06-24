@@ -1,0 +1,195 @@
+---
+title: "PDF Report Generation in SS Restaurant"
+sidebarTitle: "Reports"
+description: "Generate and download 10 types of PDF reports including daily sales, period sales, top products, table occupancy, waiter performance, and end-of-day cash close."
+---
+
+SS Restaurant includes a built-in PDF reporting engine powered by **PDFKit**. Reports are generated server-side, stored as `.pdf` files in the `Backend/reports/` directory, and made available for download via a dedicated endpoint. Every report is scoped to **admin** role — the routes are protected and each generation is written to the audit log. The `GET /api/reports/tipos` endpoint returns the complete list of valid report types so that client applications can build dynamic report menus without hard-coding values.
+
+## Available report types
+
+The engine supports exactly 10 report types. Each type has an internal `value` (used in the API) and a human-readable `label` (returned by `/api/reports/tipos` and used as the PDF title).
+
+| `value` | `label` | Primary date parameters |
+|---|---|---|
+| `ventas_diarias` | Ventas Diarias | `fecha` |
+| `ventas_periodo` | Ventas por Periodo | `fecha_inicio`, `fecha_fin` |
+| `productos_mas_vendidos` | Productos Más Vendidos | `fecha_inicio`, `fecha_fin` |
+| `ventas_por_categoria` | Ventas por Categoría | `fecha_inicio`, `fecha_fin` |
+| `ocupacion_mesas` | Ocupación de Mesas | `fecha_inicio`, `fecha_fin` |
+| `rendimiento_meseros` | Rendimiento de Meseros | `fecha_inicio`, `fecha_fin` |
+| `historial_pedidos` | Historial de Pedidos | `fecha_inicio`, `fecha_fin` |
+| `historial_pagos` | Historial de Pagos | `fecha_inicio`, `fecha_fin` |
+| `reservas` | Reservas | `fecha_inicio`, `fecha_fin` |
+| `cierre_caja` | Cierre de Caja | `fecha` |
+
+<Note>
+  All PDF files are written to `Backend/reports/` on the server. The filename pattern is `{tipo}_{unix_timestamp}.pdf`, for example `ventas_diarias_1721433600000.pdf`.
+</Note>
+
+## Generating a report
+
+```
+POST /api/reports/generate/:tipo
+Content-Type: application/json
+```
+
+Send the date parameters as a JSON body. The server validates `tipo` against the list of 10 known values and returns `400` for any unknown type.
+
+<Tabs>
+  <Tab title="ventas_diarias">
+    Generates a one-day sales summary showing total orders, total revenue, and a breakdown by payment method.
+
+    ```json
+    POST /api/reports/generate/ventas_diarias
+
+    {
+      "fecha": "2025-07-20"
+    }
+    ```
+
+    If `fecha` is omitted, the report defaults to today's date.
+  </Tab>
+  <Tab title="ventas_periodo">
+    Generates a day-by-day sales table for the selected date range, with a grand total at the bottom.
+
+    ```json
+    POST /api/reports/generate/ventas_periodo
+
+    {
+      "fecha_inicio": "2025-07-01",
+      "fecha_fin": "2025-07-20"
+    }
+    ```
+  </Tab>
+  <Tab title="productos_mas_vendidos">
+    Lists the top-selling products ranked by quantity sold within the period, including category and total revenue per product. Defaults to the top 20; pass `limit` to override.
+
+    ```json
+    POST /api/reports/generate/productos_mas_vendidos
+
+    {
+      "fecha_inicio": "2025-07-01",
+      "fecha_fin": "2025-07-20",
+      "limit": 10
+    }
+    ```
+  </Tab>
+  <Tab title="cierre_caja">
+    Produces an end-of-day cash-close summary: total orders, paid vs pending vs voided counts, gross sales, and a payment method breakdown.
+
+    ```json
+    POST /api/reports/generate/cierre_caja
+
+    {
+      "fecha": "2025-07-20"
+    }
+    ```
+
+    If `fecha` is omitted, defaults to today.
+  </Tab>
+</Tabs>
+
+**Successful response (201):**
+
+```json
+{
+  "id": 14,
+  "tipo": "ventas_diarias",
+  "archivo_pdf": "ventas_diarias_1721433600000.pdf",
+  "total_generado": 1450.75,
+  "message": "Reporte generado correctamente"
+}
+```
+
+Use the returned `id` to download the file.
+
+## Downloading a report
+
+```
+GET /api/reports/download/:id
+```
+
+Returns the PDF file as a binary download attachment. The `Content-Disposition` header is set to `attachment; filename="{tipo}_{id}.pdf"`.
+
+If the database record exists but the PDF file has been deleted from disk, the endpoint returns `404 Archivo PDF no encontrado`.
+
+## Listing reports
+
+```
+GET /api/reports
+GET /api/reports?tipo=ventas_diarias
+```
+
+Returns an array of all generated report records. Use the optional `tipo` query parameter to filter by report type. The `parametros` field is returned as a parsed JSON object.
+
+```json
+[
+  {
+    "id": 14,
+    "usuario_id": 1,
+    "tipo": "ventas_diarias",
+    "parametros": { "fecha": "2025-07-20" },
+    "fecha_inicio": "2025-07-20",
+    "fecha_fin": "2025-07-20",
+    "total_generado": 1450.75,
+    "archivo_pdf": "ventas_diarias_1721433600000.pdf",
+    "creado_en": "2025-07-20T18:00:00.000Z"
+  }
+]
+```
+
+## Deleting a report
+
+```
+DELETE /api/reports/:id
+```
+
+Deletes both the database record **and** the PDF file from `Backend/reports/`. If the file no longer exists on disk, the deletion proceeds without error (the file is simply skipped).
+
+```json
+{
+  "message": "Reporte eliminado correctamente"
+}
+```
+
+<Warning>
+  Deletion is permanent. There is no recycle bin — once the PDF file is removed from disk it cannot be recovered. Download the file before deleting if you need a permanent copy.
+</Warning>
+
+## Querying available types
+
+```
+GET /api/reports/tipos
+```
+
+Returns the full list of valid report types with their display labels. Use this in UI code to avoid hard-coding the type list.
+
+```json
+[
+  { "value": "ventas_diarias",          "label": "Ventas Diarias" },
+  { "value": "ventas_periodo",          "label": "Ventas por Periodo" },
+  { "value": "productos_mas_vendidos",  "label": "Productos Más Vendidos" },
+  { "value": "ventas_por_categoria",    "label": "Ventas por Categoría" },
+  { "value": "ocupacion_mesas",         "label": "Ocupación de Mesas" },
+  { "value": "rendimiento_meseros",     "label": "Rendimiento de Meseros" },
+  { "value": "historial_pedidos",       "label": "Historial de Pedidos" },
+  { "value": "historial_pagos",         "label": "Historial de Pagos" },
+  { "value": "reservas",                "label": "Reservas" },
+  { "value": "cierre_caja",             "label": "Cierre de Caja" }
+]
+```
+
+## PDF structure
+
+Every generated PDF follows the same layout regardless of type:
+
+1. **Header** — Restaurant name (from the `configuracion` table), address, phone, and NIT centred at the top, followed by the report title and the period covered.
+2. **Generated timestamp** — Printed below the header in the server's locale (`es-BO`).
+3. **Data table** — PDFKit renders a bordered table with alternating shaded header row. Long tables automatically paginate, repeating the column headers on each new page.
+4. **Totals footer** — A bold `Total General` line right-aligned below the table (where applicable).
+5. **Page number** — Printed at the bottom of each page.
+
+<Tip>
+  The restaurant name, address, and NIT printed in each PDF are pulled from `configuracion` row `id = 1`. Update that record in the database to change the branding on all future reports.
+</Tip>

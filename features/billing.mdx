@@ -1,0 +1,217 @@
+---
+title: "Payments, Tickets, and Invoices (Facturas)"
+sidebarTitle: "Billing"
+description: "Process payments in four methods, automatically generate PDF tickets and tax invoices, and view daily payment summaries — all restricted to admin and cajero roles."
+---
+
+SS Restaurant's billing system is built around three linked records: a **pago** (payment), an optional **ticket** (receipt), and an optional **factura** (tax invoice). A single `POST /api/payments` call can create all three atomically. The payment logic tracks partial payments — `estado_pago` on the order only becomes `'pagado'` when the cumulative amount received equals or exceeds the order total. Only **admin** and **cajero** roles can process payments; all authenticated users can read payment history.
+
+## Payment methods
+
+The following four values are accepted for the `metodo` field:
+
+<CardGroup cols={4}>
+  <Card title="efectivo" icon="banknotes">
+    Cash payment at the table or cashier.
+  </Card>
+  <Card title="tarjeta" icon="credit-card">
+    Debit or credit card via POS terminal.
+  </Card>
+  <Card title="qr" icon="qr-code">
+    QR code scan (Bolivian payment apps).
+  </Card>
+  <Card title="transferencia" icon="arrow-right-arrow-left">
+    Bank transfer with a reference number.
+  </Card>
+</CardGroup>
+
+## Processing a payment
+
+```json
+POST /api/payments
+Content-Type: application/json
+
+{
+  "pedido_id": 84,
+  "monto": 108.50,
+  "metodo": "tarjeta",
+  "referencia": "TXN-20250720-001",
+  "generar_ticket": true,
+  "generar_factura": false,
+  "nit_ci": null,
+  "razon_social": null
+}
+```
+
+| Field | Required | Description |
+|---|---|---|
+| `pedido_id` | ✅ | ID of the order being paid |
+| `monto` | ✅ | Amount received in Bolivianos |
+| `metodo` | ✅ | One of `efectivo`, `tarjeta`, `qr`, `transferencia` |
+| `referencia` | Optional | Transaction reference (slip number, transfer code, etc.) |
+| `generar_ticket` | Optional | `true` to automatically create a ticket; only fires when `estado_pago` becomes `'pagado'` |
+| `generar_factura` | Optional | `true` to automatically create a factura; requires `nit_ci` and `razon_social` |
+| `nit_ci` | Optional | Tax ID for invoice (required when `generar_factura: true`) |
+| `razon_social` | Optional | Business name for invoice (required when `generar_factura: true`) |
+
+**Successful response (201):**
+
+```json
+{
+  "message": "Pago registrado",
+  "paymentId": 55,
+  "estado_pago": "pagado",
+  "totalPagado": 108.50,
+  "ticket": {
+    "id": 31,
+    "numero_ticket": "20250720-0003",
+    "numero_diario": 3,
+    "fecha": "2025-07-20"
+  },
+  "factura": null
+}
+```
+
+When `generar_factura: true` is included alongside valid `nit_ci` and `razon_social`:
+
+```json
+POST /api/payments
+{
+  "pedido_id": 91,
+  "monto": 215.00,
+  "metodo": "qr",
+  "generar_ticket": true,
+  "generar_factura": true,
+  "nit_ci": "1234567",
+  "razon_social": "Empresa Ejemplo S.R.L."
+}
+```
+
+```json
+{
+  "message": "Pago registrado",
+  "paymentId": 56,
+  "estado_pago": "pagado",
+  "totalPagado": 215.00,
+  "ticket": {
+    "id": 32,
+    "numero_ticket": "20250720-0004",
+    "numero_diario": 4,
+    "fecha": "2025-07-20"
+  },
+  "factura": {
+    "id": 9,
+    "numero_factura": "2025-000009",
+    "nit_ci": "1234567",
+    "razon_social": "Empresa Ejemplo S.R.L.",
+    "subtotal": 215.00,
+    "impuesto": 0,
+    "total": 215.00
+  }
+}
+```
+
+## Payment status logic
+
+The order's `estado_pago` is determined by comparing the **running sum of all payments** for that order against the order total (sum of `detalle_pedido.subtotal`):
+
+```
+totalPagado = SUM(pago.monto) WHERE pago.pedido_id = :id
+
+IF totalPagado >= orderTotal THEN estado_pago = 'pagado'
+ELSE estado_pago = 'pendiente'
+```
+
+This means multiple partial payments are supported. Each `POST /api/payments` call re-evaluates the total and updates `pedido.estado_pago` accordingly.
+
+<Note>
+  The server logs a warning (but does not reject) if `monto` is less than half the order total. This allows tip-splitting or advance deposits.
+</Note>
+
+## Tickets
+
+Tickets are numbered receipts generated per order. Each order can have at most one ticket; attempting to generate a second ticket for the same order returns `400`.
+
+**Ticket number format:** `YYYYMMDD-NNNN`
+
+- `YYYYMMDD` — the calendar date the ticket was created.
+- `NNNN` — a zero-padded daily counter reset each calendar day (0001, 0002, …).
+
+Example: `20250720-0003` is the third ticket issued on 20 July 2025.
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/tickets` | List all tickets (filter by `?fecha=YYYY-MM-DD`) |
+| `GET` | `/api/tickets/hoy` | List all tickets created today |
+| `GET` | `/api/tickets/:id` | Get ticket with full order details |
+| `GET` | `/api/tickets/pedido/:pedido_id` | Get the ticket for a specific order |
+| `GET` | `/api/tickets/numero/:numero` | Look up a ticket by its printed number |
+| `POST` | `/api/tickets` | Manually generate a ticket (`{ "pedido_id": 84 }`) |
+
+## Invoices (Facturas)
+
+Facturas are tax invoices with a NIT/CI identifier. Each order can have at most one factura.
+
+**Invoice number format:** `YYYY-NNNNNN`
+
+- `YYYY` — the year the invoice was created.
+- `NNNNNN` — a zero-padded sequential counter per year (000001, 000002, …).
+
+Example: `2025-000009` is the ninth invoice issued in 2025.
+
+| Field | Description |
+|---|---|
+| `numero_factura` | Formatted invoice number |
+| `nit_ci` | Tax identification number of the recipient |
+| `razon_social` | Legal name of the company or person |
+| `subtotal` | Sum of order line items |
+| `impuesto` | Tax amount (currently stored as `0`) |
+| `total` | Total charged (`subtotal + impuesto`) |
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/invoices` | List all invoices (filter by `?fecha=YYYY-MM-DD`) |
+| `GET` | `/api/invoices/hoy` | List today's invoices |
+| `GET` | `/api/invoices/:id` | Get an invoice with full order details |
+| `GET` | `/api/invoices/pedido/:pedido_id` | Get the invoice for a specific order |
+| `POST` | `/api/invoices` | Manually generate a factura |
+
+**Manually generating a factura:**
+
+```json
+POST /api/invoices
+Content-Type: application/json
+
+{
+  "pedido_id": 91,
+  "nit_ci": "1234567",
+  "razon_social": "Empresa Ejemplo S.R.L.",
+  "codigo_control": null,
+  "qr_url": null
+}
+```
+
+## Daily payment summary
+
+```
+GET /api/payments/resumen-diario
+```
+
+Returns a breakdown of today's payments by method, total orders, and totals collected — useful for end-of-shift cash reconciliation.
+
+```json
+{
+  "fecha": "2025-07-20",
+  "total_cobrado": 1450.75,
+  "desglose": [
+    { "metodo": "efectivo", "total": 620.00, "transacciones": 8 },
+    { "metodo": "tarjeta",  "total": 530.75, "transacciones": 5 },
+    { "metodo": "qr",       "total": 300.00, "transacciones": 4 },
+    { "metodo": "transferencia", "total": 0, "transacciones": 0 }
+  ]
+}
+```
+
+<Tip>
+  For a full daily close report that also includes order counts and cancelled orders, use the **cierre_caja** report type via `POST /api/reports/generate/cierre_caja`. See the [Reports](/features/reports) page for details.
+</Tip>

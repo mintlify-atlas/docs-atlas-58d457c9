@@ -1,0 +1,276 @@
+---
+title: "Reservations API — Manage and Convert Table Reservations"
+sidebarTitle: "Reservations"
+description: "Endpoints to create, update, and confirm reservations, check table availability by time window, and convert confirmed reservations directly into active orders."
+---
+
+The Reservations API handles the full lifecycle of a table booking: walk-in and online creation, staff confirmation, availability queries, and one-click conversion to an active order. The system automatically marks overdue reservations as `no_asistio` whenever the reservation list is fetched. There are two route groups — a **public** route that requires no authentication (for customer-facing booking forms) and a set of **authenticated** routes for restaurant staff.
+
+---
+
+## Reservation object
+
+<ResponseField name="id" type="number">Unique reservation identifier.</ResponseField>
+<ResponseField name="cliente_id" type="number | null">Linked customer record ID.</ResponseField>
+<ResponseField name="mesa_id" type="number">ID of the assigned table.</ResponseField>
+<ResponseField name="mesa_numero" type="number">Human-readable table number.</ResponseField>
+<ResponseField name="cantidad_personas" type="number">Number of guests in the party.</ResponseField>
+<ResponseField name="fecha_hora_inicio" type="string">Reservation start datetime (ISO 8601).</ResponseField>
+<ResponseField name="fecha_hora_fin" type="string">Reservation end datetime (ISO 8601).</ResponseField>
+<ResponseField name="estado" type="string">
+  Current reservation state. One of `pendiente`, `confirmada`, `cancelada`, `completada`, or `no_asistio`.
+</ResponseField>
+<ResponseField name="observaciones" type="string | null">Optional notes from the customer or staff.</ResponseField>
+<ResponseField name="creado_en" type="string">ISO timestamp of when the reservation was created.</ResponseField>
+<ResponseField name="cliente_nombre" type="string | null">Name of the associated customer.</ResponseField>
+<ResponseField name="cliente_telefono" type="string | null">Phone number of the associated customer.</ResponseField>
+<ResponseField name="cliente_email" type="string | null">Email address of the associated customer.</ResponseField>
+
+---
+
+## Public routes (no authentication)
+
+### POST /api/public/reservations
+
+Accepts a booking request from a customer without requiring an account. The server automatically creates or reuses a customer record and assigns the most suitable available table if `mesa_id` is not specified.
+
+**`POST /api/public/reservations`**
+
+<ParamField body="nombre" type="string" required>
+  Customer's full name. A new customer record is created in the database using this value.
+</ParamField>
+
+<ParamField body="telefono" type="string" required>
+  Customer's phone number. Used to identify the customer record.
+</ParamField>
+
+<ParamField body="fecha_hora_inicio" type="string" required>
+  Reservation start datetime in a format accepted by MySQL (e.g. `"2024-07-20 19:00:00"`).
+</ParamField>
+
+<ParamField body="fecha_hora_fin" type="string" required>
+  Reservation end datetime. Must be after `fecha_hora_inicio`.
+</ParamField>
+
+<ParamField body="cantidad_personas" type="number" required>
+  Number of guests. Used for automatic table selection — the server will pick the smallest available table with sufficient capacity.
+</ParamField>
+
+<ParamField body="mesa_id" type="number">
+  Explicitly request a specific table. If omitted, the server auto-assigns one. Returns `400` if no tables are available.
+</ParamField>
+
+<ParamField body="email" type="string">
+  Customer's email address (optional).
+</ParamField>
+
+<ParamField body="observaciones" type="string">
+  Special requests or notes for the reservation.
+</ParamField>
+
+#### Example request
+
+```bash
+curl -X POST https://your-api-host/api/public/reservations \
+  -H "Content-Type: application/json" \
+  -d '{
+    "nombre": "Gabriela Ríos",
+    "telefono": "5512345678",
+    "email": "gabriela@example.com",
+    "fecha_hora_inicio": "2024-07-20 19:00:00",
+    "fecha_hora_fin": "2024-07-20 21:00:00",
+    "cantidad_personas": 3,
+    "observaciones": "Preferimos mesa junto a la ventana"
+  }'
+```
+
+#### Example response
+
+```json
+{
+  "message": "Reservacion creada correctamente",
+  "id": 37
+}
+```
+
+#### Public error responses
+
+| Status | Condition |
+|--------|-----------|
+| `400` | One or more required fields are missing. |
+| `400` | No tables are available for the requested time window and party size. |
+| `409` | The explicitly requested `mesa_id` is already booked for that time window. |
+| `500` | Server error. |
+
+---
+
+## Authenticated routes
+
+All routes below require `Authorization: Bearer <token>`.
+
+### GET /api/reservations
+
+Returns all reservations sorted by `fecha_hora_inicio` descending. Before returning results, the server automatically updates any past `pendiente` or `confirmada` reservations whose `fecha_hora_fin` has passed to `no_asistio`.
+
+Accepts an optional `fecha` query parameter (`YYYY-MM-DD`) to filter by start date.
+
+```bash
+# All reservations
+curl https://your-api-host/api/reservations \
+  -H "Authorization: Bearer <token>"
+
+# Filter by date
+curl "https://your-api-host/api/reservations?fecha=2024-07-20" \
+  -H "Authorization: Bearer <token>"
+```
+
+---
+
+### GET /api/reservations/pendientes
+
+Returns only reservations with `estado = 'pendiente'`, sorted by start time ascending. Useful for the host's confirmation queue.
+
+```bash
+curl https://your-api-host/api/reservations/pendientes \
+  -H "Authorization: Bearer <token>"
+```
+
+---
+
+### GET /api/reservations/mesas-disponibles
+
+Returns tables that have enough capacity and no conflicting `pendiente` or `confirmada` reservation in the specified time window.
+
+**Query parameters (all required)**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `fecha_hora_inicio` | string | Window start (e.g. `2024-07-20 19:00:00`). |
+| `fecha_hora_fin` | string | Window end. |
+| `cantidad_personas` | number | Minimum required seating capacity. |
+
+```bash
+curl "https://your-api-host/api/reservations/mesas-disponibles?fecha_hora_inicio=2024-07-20+19:00:00&fecha_hora_fin=2024-07-20+21:00:00&cantidad_personas=4" \
+  -H "Authorization: Bearer <token>"
+```
+
+Returns an array of `{ id, numero, capacidad }` objects, sorted by capacity ascending.
+
+---
+
+### GET /api/reservations/:id
+
+Returns a single reservation by ID. Returns `404` if not found.
+
+```bash
+curl https://your-api-host/api/reservations/37 \
+  -H "Authorization: Bearer <token>"
+```
+
+---
+
+### POST /api/reservations
+
+Creates a reservation from the staff side. The `mesa_id` is **required** (unlike the public endpoint, no auto-assignment is performed). The reservation checks for time conflicts before inserting.
+
+<ParamField body="mesa_id" type="number" required>ID of the table to reserve.</ParamField>
+<ParamField body="fecha_hora_inicio" type="string" required>Reservation start datetime.</ParamField>
+<ParamField body="fecha_hora_fin" type="string" required>Reservation end datetime.</ParamField>
+<ParamField body="cantidad_personas" type="number" required>Number of guests.</ParamField>
+<ParamField body="cliente_id" type="number">ID of an existing customer record to link.</ParamField>
+<ParamField body="observaciones" type="string">Staff notes.</ParamField>
+
+Returns `409` if the table is already reserved for the overlapping window.
+
+---
+
+### PUT /api/reservations/:id
+
+Performs a full replacement update. All fields except `observaciones` are required.
+
+<ParamField body="mesa_id" type="number" required>New table ID.</ParamField>
+<ParamField body="fecha_hora_inicio" type="string" required>New start datetime.</ParamField>
+<ParamField body="fecha_hora_fin" type="string" required>New end datetime.</ParamField>
+<ParamField body="cantidad_personas" type="number" required>New party size.</ParamField>
+<ParamField body="estado" type="string" required>
+  New state. Must be one of `pendiente`, `confirmada`, `cancelada`, `completada`, or `no_asistio`.
+</ParamField>
+<ParamField body="observaciones" type="string">Updated notes.</ParamField>
+
+The time-conflict check excludes the reservation being updated, so rescheduling within the same slot is allowed.
+
+---
+
+### PATCH /api/reservations/:id/estado
+
+Updates only the reservation state. When the new state is `cancelada` or `no_asistio`, the table is freed to `libre` if it has no other active orders.
+
+<ParamField body="estado" type="string" required>
+  One of `pendiente`, `confirmada`, `cancelada`, `completada`, or `no_asistio`.
+</ParamField>
+
+```bash
+curl -X PATCH https://your-api-host/api/reservations/37/estado \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{ "estado": "confirmada" }'
+```
+
+---
+
+### POST /api/reservations/:id/convertir-pedido
+
+Converts a `confirmada` or `pendiente` reservation directly into an active order in a single transaction. The reservation is marked `completada` and the table is set to `ocupada`. Returns the new order ID.
+
+**Roles:** `admin`, `mesero`, `cajero`
+
+<ParamField body="mesero_id" type="number" required>ID of the waiter opening the order.</ParamField>
+<ParamField body="items" type="array" required>
+  Order line items. Each must have `producto_id` and `cantidad`.
+
+  <Expandable title="item object">
+    <ParamField body="producto_id" type="number" required>Menu product ID.</ParamField>
+    <ParamField body="cantidad" type="number" required>Quantity.</ParamField>
+    <ParamField body="precio_unitario" type="number">Price override; defaults to current product price.</ParamField>
+    <ParamField body="observaciones" type="string">Per-item note.</ParamField>
+  </Expandable>
+</ParamField>
+<ParamField body="observaciones" type="string">Order-level notes.</ParamField>
+<ParamField body="metodo_pago" type="string">
+  Payment method if paying at seating: `efectivo`, `tarjeta`, `qr`, or `transferencia`.
+</ParamField>
+
+```bash
+curl -X POST https://your-api-host/api/reservations/37/convertir-pedido \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "mesero_id": 5,
+    "items": [
+      { "producto_id": 12, "cantidad": 2 },
+      { "producto_id": 3,  "cantidad": 1 }
+    ]
+  }'
+```
+
+```json
+{
+  "id": 102,
+  "message": "Pedido creado correctamente desde la reservacion"
+}
+```
+
+<Warning>
+  The reservation must be in `confirmada` or `pendiente` state. Attempting to convert a `cancelada`, `completada`, or `no_asistio` reservation returns `400`.
+</Warning>
+
+---
+
+### DELETE /api/reservations/:id
+
+Permanently deletes a reservation record. Returns `404` if not found.
+
+```bash
+curl -X DELETE https://your-api-host/api/reservations/37 \
+  -H "Authorization: Bearer <token>"
+```

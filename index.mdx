@@ -1,20 +1,77 @@
 ---
-title: "Introduction"
-description: "Welcome to your project"
+title: "SS Restaurant: Full-Stack Restaurant Management System"
+sidebarTitle: "Home"
+description: "SS Restaurant is a complete restaurant management platform with order tracking, table reservations, menu management, billing, and PDF reporting built on Vue 3 and Express."
 ---
 
-Write a short description of your product here. What it does, who it's for, and what they can accomplish with it.
+SS Restaurant is a full-stack management platform designed for restaurant operations. It provides a Vue 3 single-page application backed by an Express + MySQL API, covering every aspect of daily service — from taking orders at the table to generating end-of-day cash close reports.
 
-<Tip>
-  Ready to make this your own? Start by editing this page. Update your `docs.json` file to customize your site. Then fill out the [Quickstart](/quickstart) page.
-</Tip>
+<CardGroup cols={2}>
+  <Card title="Quick Start" icon="rocket" href="/quickstart">
+    Run the backend and frontend locally in under 5 minutes
+  </Card>
+  <Card title="Configuration" icon="gear" href="/configuration">
+    Environment variables, database setup, and ImageKit integration
+  </Card>
+  <Card title="Core Features" icon="utensils" href="/features/orders">
+    Orders, tables, reservations, billing, and reporting
+  </Card>
+  <Card title="API Reference" icon="code" href="/api/auth">
+    Full REST API documentation for every endpoint
+  </Card>
+</CardGroup>
 
-<Card title="Quickstart" icon="rocket" href="/quickstart">
-  This card links to the quickstart page in your project.
-</Card>
-<Card title="Components" icon="puzzle-piece" href="https://mintlify.com/docs/components">
-  Add cards, callouts, steps, tabs, and more to design and structure your pages.
-</Card>
-<Card title="Settings" icon="gear" href="https://mintlify.com/docs/organize/settings">
-  Set your site name, branding, and navigation in the `docs.json` file.
-</Card>
+## What SS Restaurant Does
+
+SS Restaurant manages the complete lifecycle of a restaurant's daily operation through a role-aware dashboard accessible to four staff roles: **admin**, **cajero** (cashier), **mesero** (waiter), and **cocina** (kitchen).
+
+<CardGroup cols={3}>
+  <Card title="Order Management" icon="clipboard-list" href="/features/orders">
+    Create, update, and track orders through kitchen preparation to delivery
+  </Card>
+  <Card title="Tables & Reservations" icon="chair" href="/features/tables-reservations">
+    Manage table status and handle advance reservations with auto table assignment
+  </Card>
+  <Card title="Menu Management" icon="book-open" href="/features/menu">
+    Organize products by category, toggle availability, and upload images via ImageKit
+  </Card>
+  <Card title="Billing" icon="receipt" href="/features/billing">
+    Process payments in four methods, generate tickets and tax invoices (facturas)
+  </Card>
+  <Card title="Reports" icon="chart-bar" href="/features/reports">
+    Generate 10 types of PDF reports from daily sales to cash close
+  </Card>
+  <Card title="Roles & Auth" icon="shield-halved" href="/roles/overview">
+    JWT-based auth with per-route role enforcement across all endpoints
+  </Card>
+</CardGroup>
+
+## Getting Started
+
+<Steps>
+  <Step title="Clone the repository">
+    ```bash
+    git clone https://github.com/FloresJesus/SS_RESTAURANT.git
+    cd SS_RESTAURANT
+    ```
+  </Step>
+  <Step title="Configure the backend environment">
+    Create `Backend/.env` with your MySQL credentials and JWT secret. See [Configuration](/configuration) for all variables.
+  </Step>
+  <Step title="Start the API server">
+    ```bash
+    cd Backend && npm install && node server.js
+    ```
+    The Express API starts on port `3000` by default.
+  </Step>
+  <Step title="Start the frontend">
+    ```bash
+    cd Frontend && npm install && npm run dev
+    ```
+    The Vue 3 SPA is served by Vite and proxies `/api` to the backend.
+  </Step>
+</Steps>
+
+<Note>
+  Two endpoints are publicly accessible without authentication: `GET /api/public/menu` for the digital menu and `POST /api/public/reservations` for online table booking. All other endpoints require a Bearer token obtained via `POST /api/auth/login`.
+</Note>

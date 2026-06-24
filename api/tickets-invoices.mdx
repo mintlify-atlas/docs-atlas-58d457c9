@@ -1,0 +1,379 @@
+---
+title: "Tickets and Invoices (Facturas) API Reference"
+sidebarTitle: "Tickets & Invoices"
+description: "Generate and retrieve sale tickets and tax invoices (facturas) linked to paid orders. Restricted to admin and cajero roles."
+---
+
+The Tickets and Invoices API handles two distinct document types that serve different fiscal purposes. A **ticket** is a simple sale receipt tied to an order: it carries a sequential daily counter (`numero_diario`) and a human-readable number formatted as `YYYYMMDD-NNNN`. A **factura** is a formal tax invoice that additionally records the customer's NIT or CI (`nit_ci`) and legal name (`razon_social`), is numbered sequentially per calendar year in the format `YYYY-NNNNNN`, and breaks the total into subtotal, tax, and total fields. Both documents are permanently associated with an order — each order may have at most one ticket and one factura. Write access to both resources requires the `admin` or `cajero` role; all GET endpoints are accessible to any authenticated user.
+
+<Tip>
+  Tickets and invoices can be generated automatically during payment processing by passing `generar_ticket: true` or `generar_factura: true` to `POST /api/payments`. Creating them via the dedicated endpoints below is useful when a document needs to be issued separately from the payment step.
+</Tip>
+
+---
+
+## Tickets
+
+### Endpoints
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `GET` | `/api/tickets` | Any | List all tickets (optional `?fecha=` filter) |
+| `GET` | `/api/tickets/hoy` | Any | Tickets issued today |
+| `GET` | `/api/tickets/pedido/:pedido_id` | Any | Get the ticket for a specific order |
+| `GET` | `/api/tickets/numero/:numero` | Any | Get a ticket by its formatted number |
+| `GET` | `/api/tickets/:id` | Any | Get a ticket by database ID |
+| `POST` | `/api/tickets` | admin, cajero | Generate a ticket for a paid order |
+
+---
+
+### GET /api/tickets
+
+Returns all tickets joined with their parent order, table, and waiter information. Pass `?fecha=YYYY-MM-DD` to filter by issue date.
+
+**Query parameters**
+
+<ParamField query="fecha" type="string">
+  Filter tickets by issue date in `YYYY-MM-DD` format. Omit to return all tickets.
+</ParamField>
+
+```bash
+# All tickets
+curl -X GET https://api.example.com/api/tickets \
+  -H "Authorization: Bearer <token>"
+
+# Tickets from a specific date
+curl -X GET "https://api.example.com/api/tickets?fecha=2025-01-15" \
+  -H "Authorization: Bearer <token>"
+```
+
+---
+
+### GET /api/tickets/hoy
+
+Returns every ticket issued today, ordered by `numero_diario` ascending. Equivalent to `GET /api/tickets?fecha=<today>`.
+
+```bash
+curl -X GET https://api.example.com/api/tickets/hoy \
+  -H "Authorization: Bearer <token>"
+```
+
+---
+
+### GET /api/tickets/pedido/:pedido_id
+
+Returns the ticket for the given order, including the full line-item details (`detalles` array). Returns `404` if the order has no ticket.
+
+```bash
+curl -X GET https://api.example.com/api/tickets/pedido/42 \
+  -H "Authorization: Bearer <token>"
+```
+
+---
+
+### GET /api/tickets/numero/:numero
+
+Looks up a ticket by its formatted number (e.g., `20250115-0001`). Returns full ticket details with line items.
+
+```bash
+curl -X GET https://api.example.com/api/tickets/numero/20250115-0001 \
+  -H "Authorization: Bearer <token>"
+```
+
+---
+
+### GET /api/tickets/:id
+
+Fetches a single ticket by its primary key, including line-item details. Returns `404` if not found.
+
+```bash
+curl -X GET https://api.example.com/api/tickets/7 \
+  -H "Authorization: Bearer <token>"
+```
+
+---
+
+### POST /api/tickets
+
+Generates a new ticket for an order. The endpoint verifies that no ticket already exists for the order before creating one.
+
+#### Request body
+
+<ParamField body="pedido_id" type="number" required>
+  The ID of the order for which to generate the ticket.
+</ParamField>
+
+#### Response
+
+<ResponseField name="message" type="string">
+  `"Ticket generado correctamente"` on success.
+</ResponseField>
+<ResponseField name="ticket" type="object">
+  The newly created ticket.
+
+  <Expandable title="ticket fields">
+    <ResponseField name="id" type="number">Ticket primary key.</ResponseField>
+    <ResponseField name="pedido_id" type="number">The associated order ID.</ResponseField>
+    <ResponseField name="numero_ticket" type="string">
+      Formatted ticket number using the pattern `YYYYMMDD-NNNN`, where `NNNN` is the zero-padded daily counter. Example: `20250115-0001`.
+    </ResponseField>
+    <ResponseField name="numero_diario" type="number">
+      Integer daily sequence number (1, 2, 3 …), reset to 1 each calendar day.
+    </ResponseField>
+    <ResponseField name="fecha" type="string">Issue date in `YYYY-MM-DD` format.</ResponseField>
+    <ResponseField name="mesa_numero" type="number">Table number from the parent order.</ResponseField>
+    <ResponseField name="mesero_nombre" type="string">First name of the assigned waiter.</ResponseField>
+  </Expandable>
+</ResponseField>
+
+```bash
+curl -X POST https://api.example.com/api/tickets \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{"pedido_id": 42}'
+```
+
+**Response `201 Created`:**
+
+```json
+{
+  "message": "Ticket generado correctamente",
+  "ticket": {
+    "id": 7,
+    "pedido_id": 42,
+    "numero_ticket": "20250115-0001",
+    "numero_diario": 1,
+    "fecha": "2025-01-15",
+    "mesa_numero": 3,
+    "mesero_nombre": "Carlos"
+  }
+}
+```
+
+#### Ticket number format
+
+Ticket numbers follow the pattern `YYYYMMDD-NNNN`:
+
+```
+20250115-0001
+│       └── 4-digit zero-padded counter, reset daily
+└────────── date the ticket was issued (no separators)
+```
+
+The counter is derived from `MAX(numero_diario)` for the current date, so it always starts at `0001` on the first ticket of each day.
+
+#### Error responses
+
+| Status | Condition |
+|--------|-----------|
+| `400` | `pedido_id` not provided |
+| `400` | Order already has a ticket — returns `{ message, ticket }` with the existing ticket |
+| `404` | Order not found |
+| `500` | Database or internal error |
+
+---
+
+## Invoices (Facturas)
+
+### Endpoints
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `GET` | `/api/invoices` | Any | List all invoices (optional `?fecha=` filter) |
+| `GET` | `/api/invoices/hoy` | Any | Invoices issued today |
+| `GET` | `/api/invoices/resumen` | Any | Today's invoice summary totals |
+| `GET` | `/api/invoices/pedido/:pedido_id` | Any | Get the invoice for a specific order |
+| `GET` | `/api/invoices/numero/:numero` | Any | Get an invoice by formatted number |
+| `GET` | `/api/invoices/:id` | Any | Get an invoice by database ID |
+| `POST` | `/api/invoices` | admin, cajero | Generate an invoice for a paid order |
+
+---
+
+### GET /api/invoices
+
+Returns all invoices joined with their parent order and table. Pass `?fecha=YYYY-MM-DD` to filter by issue date.
+
+<ParamField query="fecha" type="string">
+  Filter invoices by issue date in `YYYY-MM-DD` format.
+</ParamField>
+
+```bash
+curl -X GET https://api.example.com/api/invoices \
+  -H "Authorization: Bearer <token>"
+```
+
+---
+
+### GET /api/invoices/hoy
+
+Returns every invoice issued today. Useful for daily billing reports.
+
+```bash
+curl -X GET https://api.example.com/api/invoices/hoy \
+  -H "Authorization: Bearer <token>"
+```
+
+---
+
+### GET /api/invoices/resumen
+
+Returns aggregate totals for today's invoices: count, subtotal sum, tax sum, and grand total.
+
+```bash
+curl -X GET https://api.example.com/api/invoices/resumen \
+  -H "Authorization: Bearer <token>"
+```
+
+**Response:**
+
+```json
+{
+  "cantidad_facturas": 8,
+  "total_subtotal": 960.00,
+  "total_impuesto": 0.00,
+  "total_general": 960.00
+}
+```
+
+---
+
+### GET /api/invoices/pedido/:pedido_id
+
+Returns the invoice for the given order with full line-item details. Returns `404` if no invoice exists for the order.
+
+```bash
+curl -X GET https://api.example.com/api/invoices/pedido/42 \
+  -H "Authorization: Bearer <token>"
+```
+
+---
+
+### GET /api/invoices/numero/:numero
+
+Looks up an invoice by its formatted number (e.g., `2025-000004`). Returns full invoice details with line items.
+
+```bash
+curl -X GET https://api.example.com/api/invoices/numero/2025-000004 \
+  -H "Authorization: Bearer <token>"
+```
+
+---
+
+### GET /api/invoices/:id
+
+Fetches a single invoice by its primary key, including the `detalles` array of line items.
+
+```bash
+curl -X GET https://api.example.com/api/invoices/4 \
+  -H "Authorization: Bearer <token>"
+```
+
+---
+
+### POST /api/invoices
+
+Generates a new tax invoice for an order. The endpoint calculates the subtotal from the order's `detalle_pedido` rows and assigns the next sequential invoice number for the current year.
+
+#### Request body
+
+<ParamField body="pedido_id" type="number" required>
+  The ID of the order to invoice.
+</ParamField>
+
+<ParamField body="nit_ci" type="string" required>
+  Taxpayer identification number (NIT) or national identity card number (CI) of the customer.
+</ParamField>
+
+<ParamField body="razon_social" type="string" required>
+  Legal name or business name of the customer as it should appear on the invoice.
+</ParamField>
+
+<ParamField body="codigo_control" type="string">
+  Optional fiscal control code, if your billing system provides one.
+</ParamField>
+
+<ParamField body="qr_url" type="string">
+  Optional URL for a QR verification image to be printed on the invoice.
+</ParamField>
+
+#### Response
+
+<ResponseField name="message" type="string">
+  `"Factura generada correctamente"` on success.
+</ResponseField>
+<ResponseField name="factura" type="object">
+  The newly created invoice.
+
+  <Expandable title="factura fields">
+    <ResponseField name="id" type="number">Invoice primary key.</ResponseField>
+    <ResponseField name="pedido_id" type="number">The associated order ID.</ResponseField>
+    <ResponseField name="numero_factura" type="string">
+      Formatted invoice number using pattern `YYYY-NNNNNN`. Example: `2025-000001`.
+    </ResponseField>
+    <ResponseField name="nit_ci" type="string">Taxpayer NIT or CI on the invoice.</ResponseField>
+    <ResponseField name="razon_social" type="string">Legal name on the invoice.</ResponseField>
+    <ResponseField name="subtotal" type="number">Order subtotal before tax, in Bolivianos (Bs).</ResponseField>
+    <ResponseField name="impuesto" type="number">Tax amount. Currently `0`.</ResponseField>
+    <ResponseField name="total" type="number">Total amount (`subtotal + impuesto`).</ResponseField>
+    <ResponseField name="codigo_control" type="string">Fiscal control code, if provided.</ResponseField>
+    <ResponseField name="qr_url" type="string">QR verification URL, if provided.</ResponseField>
+  </Expandable>
+</ResponseField>
+
+```bash
+curl -X POST https://api.example.com/api/invoices \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "pedido_id": 42,
+    "nit_ci": "12345678",
+    "razon_social": "Empresa Ejemplo S.R.L."
+  }'
+```
+
+**Response `201 Created`:**
+
+```json
+{
+  "message": "Factura generada correctamente",
+  "factura": {
+    "id": 4,
+    "pedido_id": 42,
+    "numero_factura": "2025-000004",
+    "nit_ci": "12345678",
+    "razon_social": "Empresa Ejemplo S.R.L.",
+    "subtotal": 120.50,
+    "impuesto": 0,
+    "total": 120.50,
+    "codigo_control": null,
+    "qr_url": null
+  }
+}
+```
+
+#### Invoice number format
+
+Invoice numbers follow the pattern `YYYY-NNNNNN`:
+
+```
+2025-000004
+│    └── 6-digit zero-padded counter, scoped to the current year
+└──────── 4-digit calendar year
+```
+
+The counter increments by extracting `MAX(SUBSTRING_INDEX(numero_factura, '-', -1))` from existing invoices for the current year and adding 1.
+
+#### Error responses
+
+| Status | Condition |
+|--------|-----------|
+| `400` | Missing `pedido_id`, `nit_ci`, or `razon_social` |
+| `400` | Order already has an invoice — returns `{ message, factura }` with the existing one |
+| `404` | Order not found |
+| `500` | Database or internal error |
+
+---
+
+<Note>
+  Both tickets and invoices can also be auto-generated during payment processing by passing `generar_ticket: true` or `generar_factura: true` to `POST /api/payments`. Documents are created only when `estado_pago` transitions to `pagado` in that same transaction.
+</Note>

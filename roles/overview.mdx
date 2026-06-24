@@ -1,0 +1,254 @@
+---
+title: "Role-Based Access Control in SS Restaurant"
+sidebarTitle: "Roles Overview"
+description: "SS Restaurant enforces four roles — admin, cajero, mesero, and cocina — with per-route API restrictions and client-side navigation guards in Vue Router."
+---
+
+SS Restaurant uses a role-based access control (RBAC) system that governs what every authenticated user can see and do — both on the backend (Express route-level middleware) and on the frontend (Vue Router navigation guards). Every user stored in the `usuario` table carries a `rol` column, and that value is embedded in their JWT at login. All protected API routes validate the token and, where needed, check that the user's role is in an explicitly allowed set before proceeding.
+
+## Roles at a Glance
+
+There are four roles in the system. Each role maps to a named set of features available in both the sidebar navigation and the underlying API endpoints.
+
+| Role | Features |
+|------|----------|
+| `admin` | Dashboard, Customers, Menu, Orders, Tables, Reservations, Employees, Reports, Settings, Audit |
+| `cajero` | Dashboard, Orders, Payments |
+| `mesero` | Dashboard, Customers, Menu, Orders, Tables, Reservations |
+| `cocina` | Dashboard, Orders |
+
+The `ROLE_ACCESS` constant in the Vue Router configuration mirrors this table exactly and is the single source of truth for the frontend:
+
+```typescript
+// Frontend/src/router/index.ts
+const ROLE_ACCESS: Record<string, string[]> = {
+  admin: ["dashboard", "customers", "menu", "orders", "tables", "reservations", "employees", "reports", "settings", "audit"],
+  cajero: ["dashboard", "orders", "payments"],
+  mesero: ["dashboard", "customers", "menu", "orders", "tables", "reservations"],
+  cocina: ["dashboard", "orders"]
+}
+```
+
+---
+
+## Backend Enforcement
+
+Every protected route in `server.js` is guarded by one or both of the following middleware functions.
+
+### `verifyToken` — JWT Validation
+
+`verifyToken` reads the `Authorization` header, extracts the Bearer token, and verifies it using `JWT_SECRET`. On success it attaches the decoded payload to `req.user` so downstream middleware and route handlers can read `req.user.id`, `req.user.email`, and `req.user.rol`. If the decoded payload does not include a `rol` claim (for example, tokens issued by an older version of the server), it performs a database lookup via `findUserById` to hydrate the role.
+
+```javascript
+// Backend/middleware/authMiddleware.js
+const jwt = require("jsonwebtoken")
+const { findUserById } = require("../models/userModels")
+
+const verifyToken = async (req, res, next) => {
+  const authHeader = req.headers["authorization"]
+  const token = authHeader && authHeader.split(" ")[1]
+
+  if (!token) {
+    return res.status(401).json({ message: "Token de acceso requerido" })
+  }
+
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET || "secreto")
+    req.user = decoded
+
+    if (!req.user.rol) {
+      const user = await findUserById(decoded.id)
+      if (user) {
+        req.user.rol = user.rol
+      }
+    }
+
+    next()
+  } catch (error) {
+    return res.status(403).json({ message: "Token inválido o expirado" })
+  }
+}
+
+module.exports = { verifyToken }
+```
+
+### `checkRole` — Role Authorization
+
+`checkRole` is a factory function that accepts an array of allowed role strings and returns a middleware. It is always chained **after** `verifyToken` (so `req.user` is guaranteed to exist) and returns `403` if the user's role is not in the allowed list.
+
+```javascript
+// Backend/middleware/roleMiddleware.js
+const checkRole = (allowedRoles) => {
+  return (req, res, next) => {
+    if (!req.user) {
+      return res.status(401).json({ message: "Usuario no autenticado" })
+    }
+
+    if (!allowedRoles.includes(req.user.rol)) {
+      return res.status(403).json({ message: "Acceso denegado: rol no autorizado" })
+    }
+
+    next()
+  }
+}
+
+module.exports = { checkRole }
+```
+
+### How Middleware Is Applied in `server.js`
+
+Routes that need only authentication pass `verifyToken` alone. Routes that additionally restrict access to specific roles chain `checkRole([...])` immediately after.
+
+```javascript
+// Backend/server.js (excerpt)
+const { verifyToken } = require("./middleware/authMiddleware")
+const { checkRole } = require("./middleware/roleMiddleware")
+
+// Admin only
+app.use("/api/users",    verifyToken, checkRole(["admin"]), userRoutes)
+app.use("/api/settings", verifyToken, checkRole(["admin"]), settingsRoutes)
+app.use("/api/reports",  verifyToken, checkRole(["admin"]), reportRoutes)
+app.use("/api/audit",    verifyToken, checkRole(["admin"]), auditRoutes)
+
+// Admin + cajero
+app.use("/api/payments", verifyToken, checkRole(["admin", "cajero"]), paymentRoutes)
+app.use("/api/tickets",  verifyToken, checkRole(["admin", "cajero"]), ticketRoutes)
+app.use("/api/invoices", verifyToken, checkRole(["admin", "cajero"]), invoiceRoutes)
+
+// All authenticated roles
+app.use("/api/customers",     verifyToken, customerRoutes)
+app.use("/api/menu",          verifyToken, menuRoutes)
+app.use("/api/tables",        verifyToken, tableRoutes)
+app.use("/api/reservations",  verifyToken, reservationRoutes)
+app.use("/api/orders",        verifyToken, orderRoutes)
+app.use("/api/notifications", verifyToken, notificationRoutes)
+```
+
+---
+
+## Frontend Enforcement
+
+The Vue Router navigation guard runs `beforeEach` on every route change. It reads the token and user object from `localStorage`, then applies two checks in sequence:
+
+1. **Authentication check** — if no token is present the visitor is redirected to `/login`.
+2. **Role check** — if the target route has a `meta.roles` array and the user's `rol` is not in it, the guard redirects to `/` (the dashboard).
+
+```typescript
+// Frontend/src/router/index.ts
+router.beforeEach((to, from, next) => {
+  const token = localStorage.getItem("token")
+  let user = null
+  try {
+    const rawUser = localStorage.getItem("user")
+    user = rawUser ? JSON.parse(rawUser) : null
+  } catch {
+    user = null
+  }
+
+  if (to.path === "/login") {
+    if (token) {
+      next("/")
+    } else {
+      next()
+    }
+    return
+  }
+
+  if (to.path === "/reservar") {
+    next()
+    return
+  }
+
+  if (!token) {
+    next("/login")
+    return
+  }
+
+  if (to.meta.roles && user?.rol) {
+    const allowed = to.meta.roles as string[]
+    if (!allowed.includes(user.rol)) {
+      next("/")
+      return
+    }
+  }
+
+  next()
+})
+```
+
+Each protected route declares its allowed roles in the `meta.roles` field:
+
+```typescript
+// Frontend/src/router/index.ts (route definitions excerpt)
+{
+  path: "employees",
+  component: EmployeesView,
+  meta: { roles: ["admin"] }
+},
+{
+  path: "reservations",
+  component: ReservationsView,
+  meta: { roles: ["admin", "cajero", "mesero"] }  // note: cajero has route access here
+},
+{
+  path: "reports",
+  component: ReportsView,
+  meta: { roles: ["admin"] }
+},
+{
+  path: "audit",
+  component: AuditView,
+  meta: { roles: ["admin"] }
+}
+```
+
+<Note>
+  The Pinia auth store (`useAuthStore`) exposes convenience getters — `isAdmin`, `isCajero`, `isMesero`, and `isCocina` — that components can use for conditional rendering. These are derived from `state.user.rol` and are separate from the router guard.
+</Note>
+
+---
+
+## API-Level Restrictions
+
+The table below documents the effective access policy as registered in `server.js`. Routes listed as **All authenticated** require a valid token for any of the four roles.
+
+| Endpoint | Required Role(s) |
+|---|---|
+| `GET/POST/PUT/DELETE /api/users` | `admin` |
+| `GET/POST/PUT/DELETE /api/settings` | `admin` |
+| `GET /api/reports` | `admin` |
+| `GET /api/audit` | `admin` |
+| `GET/POST/PUT/DELETE /api/payments` | `admin`, `cajero` |
+| `GET/POST/PUT/DELETE /api/tickets` | `admin`, `cajero` |
+| `GET/POST/PUT/DELETE /api/invoices` | `admin`, `cajero` |
+| `GET/POST/PUT/DELETE /api/customers` | All authenticated |
+| `GET/POST/PUT/DELETE /api/menu` | All authenticated |
+| `GET/POST/PUT/DELETE /api/tables` | All authenticated |
+| `GET/POST/PUT/DELETE /api/reservations` | All authenticated |
+| `GET/POST/PUT/DELETE /api/orders` | All authenticated |
+| `GET/POST/PUT/DELETE /api/notifications` | All authenticated |
+
+<Warning>
+  Routes listed as "All authenticated" still require a valid JWT. A missing or expired token returns **401**. Only the public routes described below bypass token validation entirely.
+</Warning>
+
+---
+
+## Public Routes
+
+A small set of routes is intentionally unauthenticated to support customer-facing features.
+
+<CardGroup cols={2}>
+  <Card title="GET /api/public/menu" icon="utensils">
+    Returns the publicly visible menu. Used by the online reservation page and any embedded menu widget. No token required.
+  </Card>
+  <Card title="POST /api/public/reservations" icon="calendar">
+    Accepts reservation requests from guests. Powers the `/reservar` frontend route. No token required.
+  </Card>
+  <Card title="/login" icon="lock-open">
+    The frontend login page. The Vue Router guard explicitly skips the authentication check for this path and redirects already-authenticated users to `/`.
+  </Card>
+  <Card title="/reservar" icon="calendar-check">
+    The public-facing guest reservation form. The Vue Router guard unconditionally allows navigation to this path regardless of authentication state.
+  </Card>
+</CardGroup>

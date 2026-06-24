@@ -1,0 +1,124 @@
+{
+  "projectType": "saas",
+  "projectName": "SS Restaurant",
+  "projectDescription": "A full-stack restaurant management system with a Vue 3 frontend and Express/MySQL backend, featuring order management, table reservations, billing, reporting, and role-based access control.",
+  "theme": "almond",
+  "primaryColor": "#C0392B",
+  "lightColor": "#E74C3C",
+  "darkColor": "#922B21",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Guide",
+        "groups": [
+          {
+            "group": "Getting Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "configuration"
+            ]
+          },
+          {
+            "group": "Core Features",
+            "pages": [
+              "features/orders",
+              "features/tables-reservations",
+              "features/menu",
+              "features/billing",
+              "features/reports"
+            ]
+          },
+          {
+            "group": "Access & Roles",
+            "pages": [
+              "roles/overview",
+              "roles/authentication"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Authentication",
+            "pages": [
+              "api/auth"
+            ]
+          },
+          {
+            "group": "Restaurant Operations",
+            "pages": [
+              "api/orders",
+              "api/tables",
+              "api/reservations",
+              "api/menu",
+              "api/customers"
+            ]
+          },
+          {
+            "group": "Billing & Reporting",
+            "pages": [
+              "api/payments",
+              "api/tickets-invoices",
+              "api/reports"
+            ]
+          },
+          {
+            "group": "Administration",
+            "pages": [
+              "api/users",
+              "api/notifications",
+              "api/settings",
+              "api/audit"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Role-based access control with four roles: admin, cajero, mesero, cocina",
+    "Full order lifecycle management from creation to payment",
+    "Table management with real-time status tracking (libre, ocupada, mantenimiento)",
+    "Reservation system with online public booking endpoint",
+    "Menu management with category support and ImageKit image uploads",
+    "Payment processing supporting efectivo, tarjeta, QR, and transferencia",
+    "Automatic ticket and invoice (factura) generation on payment",
+    "PDF report generation for 10 report types including daily sales and cash close",
+    "Dashboard with Chart.js sales analytics (weekly/monthly trends, top products)",
+    "Audit logging of all significant actions with user, action, and IP"
+  ],
+  "publicApiSurface": [
+    "POST /api/auth/login",
+    "GET /api/public/menu",
+    "POST /api/public/reservations",
+    "GET /api/orders",
+    "POST /api/orders",
+    "PUT /api/orders/:id/status",
+    "GET /api/orders/stats",
+    "GET /api/tables",
+    "PATCH /api/tables/:id/estado",
+    "GET /api/reservations",
+    "POST /api/reservations",
+    "POST /api/reservations/:id/convertir-pedido",
+    "GET /api/menu",
+    "POST /api/menu",
+    "POST /api/menu/upload",
+    "GET /api/customers",
+    "POST /api/payments",
+    "GET /api/payments/resumen-diario",
+    "POST /api/tickets",
+    "POST /api/invoices",
+    "POST /api/reports/generate/:tipo",
+    "GET /api/reports/download/:id",
+    "GET /api/users",
+    "POST /api/users",
+    "GET /api/notifications",
+    "PUT /api/notifications/:id/read",
+    "GET /api/settings",
+    "PUT /api/settings",
+    "GET /api/audit"
+  ]
+}

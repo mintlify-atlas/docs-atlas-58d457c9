@@ -1,0 +1,162 @@
+---
+title: "Customers API — Manage Restaurant Customer Records"
+sidebarTitle: "Customers"
+description: "CRUD endpoints for customer records. Customers are linked to orders and reservations. Accessible to admin, cajero, and mesero roles after authentication."
+---
+
+The Customers API manages the restaurant's guest directory. Customer records are linked to both orders and reservations, allowing staff to track visit history and personalise the dining experience. All endpoints require a valid JWT in the `Authorization: Bearer <token>` header and are accessible to users with the `admin`, `cajero`, or `mesero` roles.
+
+---
+
+## Endpoint overview
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/customers` | List all customers (supports search) |
+| `GET` | `/api/customers/:id` | Get a customer by ID |
+| `POST` | `/api/customers` | Create a new customer |
+| `PUT` | `/api/customers/:id` | Update a customer |
+| `DELETE` | `/api/customers/:id` | Delete a customer |
+
+---
+
+## Customer object
+
+<ResponseField name="id" type="number">Unique customer identifier.</ResponseField>
+<ResponseField name="nombre" type="string">Customer's full name.</ResponseField>
+<ResponseField name="telefono" type="string">Customer's phone number.</ResponseField>
+<ResponseField name="email" type="string | null">Customer's email address, or `null` if not provided.</ResponseField>
+<ResponseField name="creado_en" type="string">ISO timestamp of when the record was created.</ResponseField>
+
+### Example customer object
+
+```json
+{
+  "id": 8,
+  "nombre": "Ana Torres",
+  "telefono": "5598765432",
+  "email": "ana.torres@example.com",
+  "creado_en": "2024-06-01T09:15:00.000Z"
+}
+```
+
+---
+
+## GET /api/customers
+
+Returns all customer records sorted by creation time descending. Accepts an optional `search` query parameter to filter by name, phone, or email using a case-insensitive partial match.
+
+```bash
+# List all customers
+curl https://your-api-host/api/customers \
+  -H "Authorization: Bearer <token>"
+
+# Search by name, phone, or email
+curl "https://your-api-host/api/customers?search=torres" \
+  -H "Authorization: Bearer <token>"
+```
+
+---
+
+## GET /api/customers/:id
+
+Returns a single customer record. Returns `404` if no customer with the given ID exists.
+
+```bash
+curl https://your-api-host/api/customers/8 \
+  -H "Authorization: Bearer <token>"
+```
+
+---
+
+## POST /api/customers
+
+Creates a new customer record. Returns `201` on success.
+
+### Request body
+
+<ParamField body="nombre" type="string" required>
+  Customer's full name.
+</ParamField>
+
+<ParamField body="telefono" type="string" required>
+  Customer's phone number. Used as a natural key by the public reservations endpoint.
+</ParamField>
+
+<ParamField body="email" type="string">
+  Customer's email address. Optional — stored as `null` if omitted.
+</ParamField>
+
+### Example request
+
+```bash
+curl -X POST https://your-api-host/api/customers \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "nombre": "Marco Salinas",
+    "telefono": "5544332211",
+    "email": "marco@example.com"
+  }'
+```
+
+### Example response
+
+```json
+{
+  "message": "Cliente creado correctamente",
+  "id": 24
+}
+```
+
+---
+
+## PUT /api/customers/:id
+
+Replaces a customer record with the provided values. `nombre` and `telefono` are required. Returns `404` if the customer does not exist.
+
+<ParamField body="nombre" type="string" required>Updated full name.</ParamField>
+<ParamField body="telefono" type="string" required>Updated phone number.</ParamField>
+<ParamField body="email" type="string">Updated email address. Pass `null` explicitly to clear it.</ParamField>
+
+```bash
+curl -X PUT https://your-api-host/api/customers/24 \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "nombre": "Marco A. Salinas",
+    "telefono": "5544332211",
+    "email": "marco.salinas@example.com"
+  }'
+```
+
+```json
+{
+  "message": "Cliente actualizado correctamente"
+}
+```
+
+---
+
+## DELETE /api/customers/:id
+
+Permanently removes a customer record. Returns `404` if not found.
+
+```bash
+curl -X DELETE https://your-api-host/api/customers/24 \
+  -H "Authorization: Bearer <token>"
+```
+
+```json
+{
+  "message": "Cliente eliminado correctamente"
+}
+```
+
+---
+
+## Automatic customer creation
+
+<Note>
+  When a booking is submitted through the public reservation endpoint (`POST /api/public/reservations`), the server automatically creates a customer record using the `nombre`, `telefono`, and `email` fields from the request. If a customer with that phone number already exists, a new record is still inserted — there is no de-duplication on the public path. Use `GET /api/customers?search=<phone>` to check for existing records before creating one manually.
+</Note>

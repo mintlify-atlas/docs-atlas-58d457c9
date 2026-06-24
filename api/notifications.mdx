@@ -1,0 +1,144 @@
+---
+title: "Notifications API — Staff Alerts for Order Events"
+sidebarTitle: "Notifications"
+description: "Fetch and mark as read in-app notifications triggered by order status changes. Notifications are routed to relevant roles: cocina, mesero, or admin."
+---
+
+The Notifications API delivers in-app alerts to the relevant staff roles whenever a key order event occurs. Notifications are created automatically by the order controller when an order's status changes — no manual creation is required during normal operations. Each notification targets a specific role (`usuario_destino`), so kitchen staff see order-ready alerts, waiters see delivery cues, and admins receive confirmation when an order is delivered. The `GET /api/notifications` endpoint returns only the notifications that are relevant to the currently authenticated user's role, together with the count of unread items. Authenticated users of any role can read and mark their own notifications.
+
+---
+
+## How notifications are created
+
+Notifications are inserted automatically by the order status-change handler (`PUT /api/orders/:id/status`). The routing rules are:
+
+| Order status transition | Notification type | Target role | Example message |
+|------------------------|-------------------|-------------|-----------------|
+| Order created → `pendiente` | `order_pending` | `cocina` | "Nuevo pedido #42 en Mesa 3" |
+| Status set to `en_preparacion` | `order_preparing` | `cocina` | "Pedido #42 en preparación" |
+| Status set to `listo` | `order_ready` | `mesero` | "Pedido #42 listo para servir" |
+| Status set to `entregado` | `order_delivered` | `admin` | "Pedido #42 entregado en Mesa 3" |
+
+Notifications are stored in the `notificaciones` table with up to 20 most-recent entries returned per request (ordered by `creado_en DESC`).
+
+---
+
+## Endpoints
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `GET` | `/api/notifications` | Any authenticated | List notifications for the current user's role |
+| `PUT` | `/api/notifications/:id/read` | Any authenticated | Mark a single notification as read |
+| `PUT` | `/api/notifications/read-all` | Any authenticated | Mark all notifications for the current role as read |
+
+---
+
+## GET /api/notifications
+
+Returns the 20 most recent notifications relevant to the authenticated user's role, along with the count of unread items. Notifications are matched by `usuario_destino = <current user's role>` or `usuario_destino IS NULL` (broadcast).
+
+```bash
+curl -X GET https://api.example.com/api/notifications \
+  -H "Authorization: Bearer <token>"
+```
+
+**Response:**
+
+```json
+{
+  "notifications": [
+    {
+      "id": 18,
+      "tipo": "order_ready",
+      "titulo": "Pedido listo",
+      "mensaje": "Pedido #42 está listo para servir en Mesa 3",
+      "referencia_id": 42,
+      "referencia_tipo": "pedido",
+      "leida": false,
+      "creado_en": "2025-01-15T19:45:00.000Z"
+    },
+    {
+      "id": 15,
+      "tipo": "order_pending",
+      "titulo": "Nuevo pedido",
+      "mensaje": "Nuevo pedido #41 recibido en Mesa 7",
+      "referencia_id": 41,
+      "referencia_tipo": "pedido",
+      "leida": true,
+      "creado_en": "2025-01-15T19:30:00.000Z"
+    }
+  ],
+  "unreadCount": 1
+}
+```
+
+<ResponseField name="notifications" type="array">
+  Array of notification objects for the authenticated user's role. Maximum 20 items, newest first.
+
+  <Expandable title="notification object fields">
+    <ResponseField name="id" type="number">Notification primary key.</ResponseField>
+    <ResponseField name="tipo" type="string">
+      Notification type identifier: `order_pending`, `order_preparing`, `order_ready`, or `order_delivered`.
+    </ResponseField>
+    <ResponseField name="titulo" type="string">Short notification title suitable for display in a badge or toast.</ResponseField>
+    <ResponseField name="mensaje" type="string">Longer notification body text with contextual details.</ResponseField>
+    <ResponseField name="referencia_id" type="number">
+      Primary key of the related record (e.g., the order ID). May be `null` for system notifications.
+    </ResponseField>
+    <ResponseField name="referencia_tipo" type="string">
+      Type of the related record, e.g., `"pedido"`. May be `null`.
+    </ResponseField>
+    <ResponseField name="leida" type="boolean">
+      `false` if the notification has not yet been read; `true` after `PUT /api/notifications/:id/read` or `PUT /api/notifications/read-all`.
+    </ResponseField>
+    <ResponseField name="creado_en" type="string">ISO 8601 timestamp when the notification was created.</ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="unreadCount" type="number">
+  Total number of unread notifications for the current role. Use this to render a badge counter in the UI.
+</ResponseField>
+
+---
+
+## PUT /api/notifications/:id/read
+
+Marks a single notification as read by setting `leida = 1` on the specified record.
+
+```bash
+curl -X PUT https://api.example.com/api/notifications/18/read \
+  -H "Authorization: Bearer <token>"
+```
+
+**Response `200 OK`:**
+
+```json
+{ "message": "Notificacion marcada como leida" }
+```
+
+---
+
+## PUT /api/notifications/read-all
+
+Marks every unread notification targeted at the authenticated user's role as read in one operation. Equivalent to calling `PUT /api/notifications/:id/read` for each unread item, but more efficient.
+
+```bash
+curl -X PUT https://api.example.com/api/notifications/read-all \
+  -H "Authorization: Bearer <token>"
+```
+
+**Response `200 OK`:**
+
+```json
+{ "message": "Todas las notificaciones marcadas como leidas" }
+```
+
+---
+
+<Note>
+  Notifications cannot be created manually through this API during normal operations. They are always generated automatically by the order status-change endpoint (`PUT /api/orders/:id/status`). For special administrative purposes you can insert a raw audit-style entry via `POST /api/audit`, but standard operational notifications should be driven by order state transitions.
+</Note>
+
+<Note>
+  The `usuario_destino` field in the database stores the **role name** (e.g., `"cocina"`, `"mesero"`, `"admin"`), not a specific user ID. All users sharing the same role will see the same notification in their feed.
+</Note>

@@ -1,47 +1,166 @@
 ---
-title: "Quickstart"
-description: "Begin with a guide on the fastest path to a successful outcome"
+title: "Get SS Restaurant Running Locally in 5 Minutes"
+sidebarTitle: "Quickstart"
+description: "Install dependencies, configure your MySQL database, seed sample data, and launch both the Express API and Vue 3 frontend with a working login."
 ---
 
-Describe how someone begins using your product. What is the first thing they need to do? Are there any prerequisites?
-
-A quickstart should take someone from zero to using your product. They'll get a quick win and a sense of what they can accomplish.
+This guide walks you from a fresh clone to a fully operational SS Restaurant instance — backend API, MySQL database, sample data, and Vue 3 frontend — in a single terminal session. By the end you will have a working admin login and a seeded menu you can start exploring immediately.
 
 ## Prerequisites
 
-Before you begin, you must have:
+Before you begin, make sure the following are available on your machine:
 
-- Requirement one (for example, Node.js 18+, a free account, an API key)
-- Requirement two (for example, a compatible device, a compatible browser, a compatible operating system)
+- **Node.js 18+** (the frontend `engines` field requires `^20.19.0 || >=22.12.0` for full compatibility)
+- **MySQL 8+** running locally or accessible over the network
+- **npm** (bundled with Node.js)
+- A terminal with access to the cloned repository root
 
-## Get started
+---
+
+## Steps
 
 <Steps>
-  <Step title="Install">
-    Describe how to install your product or sign up.
 
+  <Step title="Clone the repository">
     ```bash
-    npm install your-package
+    git clone https://github.com/FloresJesus/SS_RESTAURANT.git
+    cd SS_RESTAURANT
     ```
   </Step>
-  <Step title="Configure">
-    Describe any setup or configuration needed before first use.
+
+  <Step title="Create the backend environment file">
+    Create a file named `.env` inside the `Backend/` directory. This file is read by `dotenv` at startup and must exist before you run the server.
 
     ```bash
-    your-cli init
+    # Backend/.env
+    DB_HOST=localhost
+    DB_USER=root
+    DB_PASSWORD=your_mysql_password
+    DB_NAME=restaurante
+
+    JWT_SECRET=replace_with_a_long_random_string
+
+    PORT=3000
+
+    IMAGEKIT_PUBLIC_KEY=your_imagekit_public_key
+    IMAGEKIT_PRIVATE_KEY=your_imagekit_private_key
+    IMAGEKIT_URL_ENDPOINT=https://ik.imagekit.io/your_imagekit_id
     ```
+
+    The three `IMAGEKIT_*` variables are only required if you want to upload menu item images. The rest of the application works without them.
   </Step>
-  <Step title="Run it">
-    Show the first thing a user does to see it working.
+
+  <Step title="Create the MySQL database">
+    Connect to your MySQL server and create the database that matches the `DB_NAME` value in your `.env`:
+
+    ```sql
+    CREATE DATABASE restaurante;
+    ```
+
+    SS Restaurant expects the tables to already exist. Run your schema migration script (if provided) or let the application's first requests surface any missing-table errors so you can apply them manually.
+  </Step>
+
+  <Step title="Install backend dependencies and start the API server">
+    ```bash
+    cd Backend
+    npm install
+    node server.js
+    ```
+
+    You should see:
+
+    ```
+    Servidor corriendo en puerto 3000
+    ```
+
+    The API is now accepting requests at `http://localhost:3000`.
+  </Step>
+
+  <Step title="Seed the database with sample data">
+    While still inside the `Backend/` directory, run the seed script to populate the database with a realistic starting dataset:
 
     ```bash
-    your-cli start
+    node seed.js
+    ```
+
+    Expected output:
+
+    ```
+    Inserting seed data...
+    Seed complete!
+    ```
+
+    The seeder inserts:
+
+    | Table | Records inserted |
+    |---|---|
+    | `categoria_producto` | 4 categories: Entradas, Platos Principales, Bebidas, Postres |
+    | `producto` | 7 products: Ceviche, Empanadas, Lomo Saltado, Pollo a la Brasa, Chicha Morada, Limonada, Suspiro Limeño |
+    | `mesa` | 5 tables (capacities 2, 4, 4, 6, 8 — all `libre`) |
+    | `cliente` | 2 customers: Juan Perez and Maria Lopez |
+
+    The seeder clears any existing rows in `detalle_pedido`, `pedido`, `reserva`, `cliente`, `producto`, `categoria_producto`, and `mesa` before inserting, so it is safe to re-run to reset your local data.
+  </Step>
+
+  <Step title="Install frontend dependencies">
+    Open a new terminal tab, navigate to the `Frontend/` directory, and install packages:
+
+    ```bash
+    cd Frontend
+    npm install
     ```
   </Step>
+
+  <Step title="Start the Vue 3 dev server">
+    ```bash
+    npm run dev
+    ```
+
+    Vite will start the dev server and print something like:
+
+    ```
+    VITE v7.x.x  ready in 500 ms
+
+    ➜  Local:   http://localhost:5173/
+    ➜  Network: use --host to expose
+    ```
+
+    The Vite dev server is configured to proxy all `/api` requests to `http://localhost:3000`, so the frontend communicates with your local Express API automatically.
+  </Step>
+
+  <Step title="Log in with the seeded admin account">
+    Open your browser and go to:
+
+    ```
+    http://localhost:5173/login
+    ```
+
+    Use the admin credentials that were inserted alongside your database schema (typically created during initial setup with a hashed password via `bcryptjs`). After a successful login the API returns a JWT valid for **8 hours**, which the frontend stores in `localStorage` and attaches to every subsequent request via the `Authorization: Bearer` header.
+
+    Once logged in you will land on the dashboard where you can see sales metrics, active orders, and table status.
+  </Step>
+
 </Steps>
 
-<Tip>
-  Give people a way to get help. This could be a link to a support page, a chat with a customer support agent, or a forum for your product.
+---
 
-  Example: Need help? Reach out to us at [support@yourcompany.com](mailto:support@yourcompany.com).
+## Development Tips
+
+<Tip>
+  Install `nodemon` globally to automatically restart the Express server whenever you change a backend file — no more manual `Ctrl+C` and restart cycles:
+
+  ```bash
+  npm install -g nodemon
+  cd Backend
+  nodemon server.js
+  ```
 </Tip>
+
+<Warning>
+  **Never use a weak or default `JWT_SECRET` in production.** The `authMiddleware.js` falls back to the string `"secreto"` when `JWT_SECRET` is not set, which means any attacker can forge valid tokens for any user and role. Always set a cryptographically random secret of at least 32 characters in your production `.env`:
+
+  ```bash
+  # generate a strong secret (macOS / Linux)
+  node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+  ```
+</Warning>

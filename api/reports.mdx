@@ -1,0 +1,239 @@
+---
+title: "Reports API — Generate and Download PDF Reports"
+sidebarTitle: "Reports"
+description: "Generate 10 types of PDF reports from daily sales to cash close. Reports are stored on disk and downloadable by ID. Restricted to admin role."
+---
+
+The Reports API generates on-demand PDF documents from live restaurant data. Each call to `POST /api/reports/generate/:tipo` queries the relevant tables, renders a formatted PDF using PDFKit (including the restaurant's name, address, phone, and NIT from the `configuracion` table in the header), saves the file to the server's `reports/` directory, and records metadata in the database. The generated PDF can then be downloaded by its assigned ID. All report endpoints are restricted to the `admin` role.
+
+---
+
+## Endpoints
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `GET` | `/api/reports/tipos` | admin | List all valid report types with labels |
+| `GET` | `/api/reports` | admin | List previously generated reports (optional `?tipo=` filter) |
+| `GET` | `/api/reports/:id` | admin | Get metadata for a single generated report |
+| `POST` | `/api/reports/generate/:tipo` | admin | Generate a new PDF report |
+| `GET` | `/api/reports/download/:id` | admin | Download the PDF file |
+| `DELETE` | `/api/reports/:id` | admin | Delete the report record and its PDF file |
+
+---
+
+## GET /api/reports/tipos
+
+Returns the list of all valid report type identifiers with their human-readable Spanish labels.
+
+```bash
+curl -X GET https://api.example.com/api/reports/tipos \
+  -H "Authorization: Bearer <token>"
+```
+
+**Response:**
+
+```json
+[
+  { "value": "ventas_diarias",          "label": "Ventas Diarias" },
+  { "value": "ventas_periodo",          "label": "Ventas por Periodo" },
+  { "value": "productos_mas_vendidos",  "label": "Productos Más Vendidos" },
+  { "value": "ventas_por_categoria",    "label": "Ventas por Categoría" },
+  { "value": "ocupacion_mesas",         "label": "Ocupación de Mesas" },
+  { "value": "rendimiento_meseros",     "label": "Rendimiento de Meseros" },
+  { "value": "historial_pedidos",       "label": "Historial de Pedidos" },
+  { "value": "historial_pagos",         "label": "Historial de Pagos" },
+  { "value": "reservas",                "label": "Reservas" },
+  { "value": "cierre_caja",             "label": "Cierre de Caja" }
+]
+```
+
+---
+
+## Report types
+
+| Type identifier | Label | Description |
+|-----------------|-------|-------------|
+| `ventas_diarias` | Ventas Diarias | Orders and payment totals for a single day, broken down by payment method |
+| `ventas_periodo` | Ventas por Periodo | Day-by-day sales totals over a date range |
+| `productos_mas_vendidos` | Productos Más Vendidos | Ranked list of products by quantity sold |
+| `ventas_por_categoria` | Ventas por Categoría | Sales grouped by product category |
+| `ocupacion_mesas` | Ocupación de Mesas | Order count and revenue per table |
+| `rendimiento_meseros` | Rendimiento de Meseros | Orders attended and revenue per waiter |
+| `historial_pedidos` | Historial de Pedidos | Full order history with statuses and totals |
+| `historial_pagos` | Historial de Pagos | Payment transaction history with methods |
+| `reservas` | Reservas | Reservation history with status breakdown |
+| `cierre_caja` | Cierre de Caja | Cash-close summary: orders, payment methods, and total collected |
+
+---
+
+## GET /api/reports
+
+Returns metadata for all previously generated reports. Pass `?tipo=` to filter by report type.
+
+**Query parameters**
+
+<ParamField query="tipo" type="string">
+  Filter by report type identifier (e.g., `ventas_diarias`). Omit to return all reports.
+</ParamField>
+
+```bash
+curl -X GET "https://api.example.com/api/reports?tipo=ventas_diarias" \
+  -H "Authorization: Bearer <token>"
+```
+
+---
+
+## GET /api/reports/:id
+
+Returns the stored metadata for a single report. The `parametros` field contains the original generation parameters as a parsed JSON object.
+
+```bash
+curl -X GET https://api.example.com/api/reports/9 \
+  -H "Authorization: Bearer <token>"
+```
+
+**Response:**
+
+```json
+{
+  "id": 9,
+  "tipo": "ventas_diarias",
+  "archivo_pdf": "ventas_diarias_1736956800000.pdf",
+  "parametros": { "fecha": "2025-01-15" },
+  "fecha_inicio": "2025-01-15",
+  "fecha_fin": "2025-01-15",
+  "total_generado": 1625.50,
+  "creado_en": "2025-01-15T22:00:00.000Z"
+}
+```
+
+<ResponseField name="id" type="number">Report primary key.</ResponseField>
+<ResponseField name="tipo" type="string">Report type identifier.</ResponseField>
+<ResponseField name="archivo_pdf" type="string">Filename of the stored PDF on the server (used internally).</ResponseField>
+<ResponseField name="parametros" type="object">Original generation parameters as a parsed JSON object.</ResponseField>
+<ResponseField name="fecha_inicio" type="string">Start of the report period (`YYYY-MM-DD`).</ResponseField>
+<ResponseField name="fecha_fin" type="string">End of the report period (`YYYY-MM-DD`).</ResponseField>
+<ResponseField name="total_generado" type="number">Grand total value shown in the report footer, in Bolivianos (Bs).</ResponseField>
+<ResponseField name="creado_en" type="string">ISO 8601 timestamp when the report was generated.</ResponseField>
+
+---
+
+## POST /api/reports/generate/:tipo
+
+Generates a new PDF report of the specified type. The body parameters vary by report type as described below. On success the PDF is written to disk and a metadata record is inserted; the response includes the new report's `id` which can be used to download the file.
+
+### Path parameter
+
+<ParamField path="tipo" type="string" required>
+  One of the ten valid report type identifiers. Passing an unknown type returns `400`.
+</ParamField>
+
+### Body parameters by report type
+
+<ParamField body="fecha" type="string">
+  Target date in `YYYY-MM-DD` format. Used by `ventas_diarias` and `cierre_caja`. Defaults to today if omitted.
+</ParamField>
+
+<ParamField body="fecha_inicio" type="string">
+  Start of the date range in `YYYY-MM-DD` format. Required for `ventas_periodo`, `productos_mas_vendidos`, `ventas_por_categoria`, `ocupacion_mesas`, `rendimiento_meseros`, `historial_pedidos`, `historial_pagos`, and `reservas`.
+</ParamField>
+
+<ParamField body="fecha_fin" type="string">
+  End of the date range in `YYYY-MM-DD` format. Required alongside `fecha_inicio` for all period-based report types.
+</ParamField>
+
+<ParamField body="limit" type="number">
+  Maximum number of rows to include in the `productos_mas_vendidos` report. Defaults to `20` if omitted.
+</ParamField>
+
+### Parameter matrix
+
+| Report type | `fecha` | `fecha_inicio` + `fecha_fin` | `limit` |
+|-------------|:-------:|:----------------------------:|:-------:|
+| `ventas_diarias` | optional (defaults today) | — | — |
+| `cierre_caja` | optional (defaults today) | — | — |
+| `ventas_periodo` | — | required | — |
+| `historial_pedidos` | — | required | — |
+| `historial_pagos` | — | required | — |
+| `reservas` | — | required | — |
+| `productos_mas_vendidos` | — | required | optional (default 20) |
+| `ventas_por_categoria` | — | required | — |
+| `ocupacion_mesas` | — | required | — |
+| `rendimiento_meseros` | — | required | — |
+
+### Response
+
+```json
+{
+  "id": 9,
+  "tipo": "ventas_diarias",
+  "archivo_pdf": "ventas_diarias_1736956800000.pdf",
+  "total_generado": 1625.50,
+  "message": "Reporte generado correctamente"
+}
+```
+
+<ResponseField name="id" type="number">ID of the newly created report record. Use this to download the PDF.</ResponseField>
+<ResponseField name="tipo" type="string">The report type that was generated.</ResponseField>
+<ResponseField name="archivo_pdf" type="string">Server-side filename of the generated PDF.</ResponseField>
+<ResponseField name="total_generado" type="number">Grand total value from the report data, in Bolivianos (Bs).</ResponseField>
+
+---
+
+### Example — generate ventas_diarias
+
+```bash
+curl -X POST https://api.example.com/api/reports/generate/ventas_diarias \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{"fecha": "2025-01-15"}'
+```
+
+### Example — generate ventas_periodo
+
+```bash
+curl -X POST https://api.example.com/api/reports/generate/ventas_periodo \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "fecha_inicio": "2025-01-01",
+    "fecha_fin": "2025-01-31"
+  }'
+```
+
+---
+
+## GET /api/reports/download/:id
+
+Downloads the PDF file for the given report ID. The response sets `Content-Disposition: attachment` so browsers will save the file. The downloaded filename follows the pattern `<tipo>_<id>.pdf` (e.g., `ventas_diarias_9.pdf`).
+
+```bash
+curl -X GET https://api.example.com/api/reports/download/9 \
+  -H "Authorization: Bearer <token>" \
+  -o ventas_diarias_9.pdf
+```
+
+Returns `404` if either the database record or the physical PDF file cannot be found.
+
+---
+
+## DELETE /api/reports/:id
+
+Deletes the report metadata from the database and removes the PDF file from disk. This action is irreversible.
+
+```bash
+curl -X DELETE https://api.example.com/api/reports/9 \
+  -H "Authorization: Bearer <token>"
+```
+
+**Response `200 OK`:**
+
+```json
+{ "message": "Reporte eliminado correctamente" }
+```
+
+---
+
+<Note>
+  The PDF header content (restaurant name, address, phone, NIT) is read from `GET /api/settings` at generation time. Update your restaurant's configuration before generating reports if the header information is incomplete. See the [Settings API](/api/settings) for details.
+</Note>

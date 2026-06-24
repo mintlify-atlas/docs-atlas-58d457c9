@@ -1,0 +1,202 @@
+---
+title: "Tables API — Manage Restaurant Table States"
+sidebarTitle: "Tables"
+description: "CRUD endpoints for restaurant tables with status tracking. States: libre, ocupada, mantenimiento. Includes available tables query for reservation planning."
+---
+
+The Tables API manages the physical tables in the restaurant. Each table tracks its current occupancy state, seating capacity, and whether it has an active order open today. Table states are updated automatically by the Orders API when orders are created or completed — staff can also update them manually through the PATCH endpoint. All endpoints require a valid JWT in the `Authorization: Bearer <token>` header.
+
+---
+
+## Endpoint overview
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/tables` | List all tables with active-order flag |
+| `GET` | `/api/tables/disponibles` | List tables currently in `libre` state |
+| `GET` | `/api/tables/:id` | Get a single table by ID |
+| `POST` | `/api/tables` | Create a new table |
+| `PUT` | `/api/tables/:id` | Full update (number, capacity, and state) |
+| `PATCH` | `/api/tables/:id/estado` | Update table state only |
+| `DELETE` | `/api/tables/:id` | Delete a table |
+
+---
+
+## Table object
+
+<ResponseField name="id" type="number">Unique table identifier.</ResponseField>
+<ResponseField name="numero" type="number">Human-readable table number displayed on the floor plan (e.g. `5`).</ResponseField>
+<ResponseField name="capacidad" type="number">Maximum number of seated guests.</ResponseField>
+<ResponseField name="estado" type="string">
+  Current occupancy state. One of:
+  - `libre` — table is empty and available.
+  - `ocupada` — table has an active order in progress.
+  - `mantenimiento` — table is out of service.
+</ResponseField>
+<ResponseField name="tiene_pedido_activo" type="boolean">
+  `true` when at least one order for this table has `estado_servicio` of `pendiente`, `preparando`, or `listo` and was created today. Computed at query time — not stored in the database.
+</ResponseField>
+
+### Example table object
+
+```json
+{
+  "id": 3,
+  "numero": 3,
+  "capacidad": 4,
+  "estado": "ocupada",
+  "tiene_pedido_activo": true
+}
+```
+
+---
+
+## GET /api/tables
+
+Returns all tables ordered by table number ascending, each decorated with the `tiene_pedido_activo` flag.
+
+```bash
+curl https://your-api-host/api/tables \
+  -H "Authorization: Bearer <token>"
+```
+
+---
+
+## GET /api/tables/disponibles
+
+Returns only tables whose `estado` is currently `libre`. Useful for quickly building a table-picker UI for new orders or walk-in reservations.
+
+```bash
+curl https://your-api-host/api/tables/disponibles \
+  -H "Authorization: Bearer <token>"
+```
+
+<Note>
+  This endpoint does **not** cross-check existing reservations. To find tables free during a specific time window, use the reservations availability endpoint: `GET /api/reservations/mesas-disponibles`.
+</Note>
+
+---
+
+## GET /api/tables/:id
+
+Returns a single table. Returns `404` if the table does not exist.
+
+```bash
+curl https://your-api-host/api/tables/3 \
+  -H "Authorization: Bearer <token>"
+```
+
+---
+
+## POST /api/tables
+
+Creates a new table. The new table is created in `libre` state by default.
+
+### Request body
+
+<ParamField body="numero" type="number" required>
+  Table number. Must be unique — attempting to create a duplicate returns `400 El numero de mesa ya existe`.
+</ParamField>
+
+<ParamField body="capacidad" type="number" required>
+  Seating capacity. Must be a positive integer.
+</ParamField>
+
+### Example request
+
+```bash
+curl -X POST https://your-api-host/api/tables \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "numero": 12,
+    "capacidad": 6
+  }'
+```
+
+### Example response
+
+```json
+{
+  "message": "Mesa creada correctamente",
+  "id": 12
+}
+```
+
+---
+
+## PUT /api/tables/:id
+
+Performs a full replacement update on a table record. All three body fields are required.
+
+### Request body
+
+<ParamField body="numero" type="number" required>New table number.</ParamField>
+<ParamField body="capacidad" type="number" required>New seating capacity.</ParamField>
+<ParamField body="estado" type="string" required>
+  New state. Must be one of `libre`, `ocupada`, or `mantenimiento`.
+</ParamField>
+
+```bash
+curl -X PUT https://your-api-host/api/tables/12 \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "numero": 12,
+    "capacidad": 8,
+    "estado": "mantenimiento"
+  }'
+```
+
+---
+
+## PATCH /api/tables/:id/estado
+
+Updates only the `estado` field of a table. Ideal for quick status changes from the floor-plan view without sending the full table payload.
+
+### Request body
+
+<ParamField body="estado" type="string" required>
+  Must be one of `libre`, `ocupada`, or `mantenimiento`. Any other value returns `400 Estado invalido`.
+</ParamField>
+
+### Example request
+
+```bash
+curl -X PATCH https://your-api-host/api/tables/12/estado \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{ "estado": "libre" }'
+```
+
+### Example response
+
+```json
+{
+  "message": "Estado de mesa actualizado correctamente"
+}
+```
+
+---
+
+## DELETE /api/tables/:id
+
+Permanently deletes a table record. Returns `404` if the table does not exist.
+
+```bash
+curl -X DELETE https://your-api-host/api/tables/12 \
+  -H "Authorization: Bearer <token>"
+```
+
+---
+
+## Automatic state transitions
+
+<Note>
+  You do not need to call `PATCH /api/tables/:id/estado` during normal order flow. The Orders API manages table states automatically:
+
+  - **Creating an order** (`POST /api/orders`) sets the linked table's `estado` to `ocupada`.
+  - **Updating order status** to `delivered` or `cancelled` sets the table's `estado` back to `libre`.
+</Note>
+
+Use `PATCH /api/tables/:id/estado` only when you need to override state manually — for example, placing a table under `mantenimiento` for cleaning, or recovering from an interrupted workflow.

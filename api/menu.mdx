@@ -1,0 +1,254 @@
+---
+title: "Menu API — Products, Categories, and Image Uploads"
+sidebarTitle: "Menu"
+description: "Endpoints to list, create, update, and delete menu products and categories. Image upload via multipart form to ImageKit. Public menu returns only available items."
+---
+
+The Menu API manages the restaurant's product catalogue and categories. Products carry availability flags so the kitchen can toggle items on or off without deleting them. Images are hosted on ImageKit and referenced by URL. There are two access tiers: a **public** endpoint returns only available products and categories without authentication, while the **authenticated** endpoints expose the full catalogue and mutation operations.
+
+---
+
+## Product object
+
+<ResponseField name="id" type="number">Unique product identifier.</ResponseField>
+<ResponseField name="categoria_id" type="number | null">ID of the associated category, or `null` if uncategorised.</ResponseField>
+<ResponseField name="categoria_nombre" type="string | null">Category name joined from the `categoria_producto` table.</ResponseField>
+<ResponseField name="nombre" type="string">Product name.</ResponseField>
+<ResponseField name="descripcion" type="string | null">Optional description shown on menus and order screens.</ResponseField>
+<ResponseField name="precio" type="number">Unit price.</ResponseField>
+<ResponseField name="imagen_url" type="string | null">Full URL to the product image hosted on ImageKit.</ResponseField>
+<ResponseField name="disponible" type="boolean">`true` if the product is currently available to order.</ResponseField>
+<ResponseField name="creado_en" type="string">ISO timestamp of product creation.</ResponseField>
+
+---
+
+## Public routes (no authentication)
+
+### GET /api/public/menu
+
+Returns the live, customer-facing menu. Only products where `disponible = true` are included. Results are grouped by category name, then by product name.
+
+**`GET /api/public/menu`**
+
+```bash
+curl https://your-api-host/api/public/menu
+```
+
+### Response
+
+```json
+{
+  "products": [
+    {
+      "id": 7,
+      "categoria_id": 2,
+      "categoria_nombre": "Entradas",
+      "nombre": "Sopa del Día",
+      "descripcion": "Sopa casera según temporada",
+      "precio": 55.50,
+      "imagen_url": "https://ik.imagekit.io/ssrestaurant/menu/sopa.jpg",
+      "disponible": true,
+      "creado_en": "2024-01-10T10:00:00.000Z"
+    }
+  ],
+  "categories": [
+    { "id": 2, "nombre": "Entradas" },
+    { "id": 1, "nombre": "Platos Fuertes" },
+    { "id": 3, "nombre": "Postres" }
+  ]
+}
+```
+
+---
+
+## Category endpoints (authenticated)
+
+All routes below require `Authorization: Bearer <token>`.
+
+### GET /api/menu/categorias
+
+Returns all product categories ordered alphabetically.
+
+```bash
+curl https://your-api-host/api/menu/categorias \
+  -H "Authorization: Bearer <token>"
+```
+
+```json
+[
+  { "id": 2, "nombre": "Entradas" },
+  { "id": 1, "nombre": "Platos Fuertes" },
+  { "id": 3, "nombre": "Postres" }
+]
+```
+
+---
+
+### POST /api/menu/categorias
+
+Creates a new product category. Returns `400` if a category with the same name already exists.
+
+**Roles:** `admin`
+
+<ParamField body="nombre" type="string" required>
+  Category name. Must be unique. Case-sensitive duplicate check.
+</ParamField>
+
+```bash
+curl -X POST https://your-api-host/api/menu/categorias \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{ "nombre": "Bebidas" }'
+```
+
+```json
+{
+  "message": "Categoria creada correctamente",
+  "id": 4
+}
+```
+
+---
+
+## Product endpoints (authenticated)
+
+### GET /api/menu
+
+Returns all products (including unavailable ones) with category names. Ordered by category name, then product name.
+
+```bash
+curl https://your-api-host/api/menu \
+  -H "Authorization: Bearer <token>"
+```
+
+---
+
+### POST /api/menu
+
+Creates a new menu product. If `categoria_id` is provided, the category must exist.
+
+**Roles:** `admin`
+
+<ParamField body="nombre" type="string" required>
+  Product name shown on orders and menus.
+</ParamField>
+
+<ParamField body="precio" type="number" required>
+  Unit price. Stored as a decimal; values are coerced with `Number()`.
+</ParamField>
+
+<ParamField body="categoria_id" type="number">
+  ID of an existing category. Returns `400` if the category is not found.
+</ParamField>
+
+<ParamField body="descripcion" type="string">
+  Optional description text.
+</ParamField>
+
+<ParamField body="disponible" type="boolean">
+  Whether the product is immediately available to order. Defaults to `true`.
+</ParamField>
+
+<ParamField body="imagen_url" type="string">
+  Direct URL to a product image. Use `POST /api/menu/upload` to obtain a hosted URL first.
+</ParamField>
+
+#### Example request
+
+```bash
+curl -X POST https://your-api-host/api/menu \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "nombre": "Pasta Carbonara",
+    "precio": 95.00,
+    "categoria_id": 1,
+    "descripcion": "Pasta con salsa cremosa de huevo, queso parmesano y panceta",
+    "disponible": true,
+    "imagen_url": "https://ik.imagekit.io/ssrestaurant/menu/carbonara.jpg"
+  }'
+```
+
+#### Example response
+
+```json
+{
+  "message": "Producto creado correctamente",
+  "id": 15
+}
+```
+
+---
+
+### PUT /api/menu/:id
+
+Replaces all fields of an existing product. `nombre` and `precio` are required; all others fall back to the stored value if omitted. Returns `404` if the product does not exist.
+
+**Roles:** `admin`
+
+```bash
+curl -X PUT https://your-api-host/api/menu/15 \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "nombre": "Pasta Carbonara Especial",
+    "precio": 105.00,
+    "categoria_id": 1,
+    "descripcion": "Receta actualizada con trufa negra",
+    "disponible": true,
+    "imagen_url": "https://ik.imagekit.io/ssrestaurant/menu/carbonara_v2.jpg"
+  }'
+```
+
+---
+
+### DELETE /api/menu/:id
+
+Permanently removes a product from the catalogue. Returns `404` if not found.
+
+**Roles:** `admin`
+
+```bash
+curl -X DELETE https://your-api-host/api/menu/15 \
+  -H "Authorization: Bearer <token>"
+```
+
+---
+
+### POST /api/menu/upload
+
+Uploads a product image to ImageKit under the `/RestauranteSS/menu/` folder. The file is uploaded as `multipart/form-data` with the field name `image`. Returns the hosted URL to store in `imagen_url`.
+
+**Roles:** `admin`
+
+**Constraints:**
+- Only image MIME types are accepted (`image/*`).
+- Maximum file size: **3 MB**.
+
+<ParamField body="image" type="file" required>
+  Binary image file. Field name must be exactly `image`.
+</ParamField>
+
+```bash
+curl -X POST https://your-api-host/api/menu/upload \
+  -H "Authorization: Bearer <token>" \
+  -F "image=@/path/to/carbonara.jpg"
+```
+
+### Upload response
+
+<ResponseField name="imageUrl" type="string">Full CDN URL of the uploaded image on ImageKit.</ResponseField>
+<ResponseField name="path" type="string">Same as `imageUrl`. Use this value as `imagen_url` when creating or updating a product.</ResponseField>
+<ResponseField name="fileId" type="string">ImageKit file identifier, useful for future management operations.</ResponseField>
+
+```json
+{
+  "imageUrl": "https://ik.imagekit.io/ssrestaurant/menu/1718400000000_carbonara.jpg",
+  "path": "https://ik.imagekit.io/ssrestaurant/menu/1718400000000_carbonara.jpg",
+  "fileId": "664abc123def456"
+}
+```
+
+<Tip>
+  Upload the image first with `POST /api/menu/upload`, then pass the returned `path` value as `imagen_url` in a subsequent `POST /api/menu` or `PUT /api/menu/:id` call.
+</Tip>

@@ -1,0 +1,267 @@
+---
+title: "Authenticate with SS Restaurant API"
+sidebarTitle: "Authentication"
+description: "Obtain a JWT token via POST /api/auth/login and pass it as a Bearer token in the Authorization header on all subsequent API requests."
+---
+
+SS Restaurant uses JSON Web Tokens (JWT) for stateless authentication. You exchange a valid email and password for a signed token at `/api/auth/login`, then include that token in the `Authorization: Bearer <token>` header on every subsequent request. Tokens are valid for **8 hours** from the moment of issue and carry the user's `id`, `email`, and `rol` as claims, allowing both the backend middleware and the frontend router to make access decisions without an additional database round-trip.
+
+---
+
+## Login
+
+Send a `POST` request to `/api/auth/login` with the user's credentials. The endpoint is unauthenticated — no token is needed to call it.
+
+<Tabs>
+  <Tab title="Request">
+    **Method:** `POST`  
+    **URL:** `/api/auth/login`  
+    **Content-Type:** `application/json`
+
+    | Field | Type | Required | Description |
+    |-------|------|----------|-------------|
+    | `email` | string | ✅ | The user's registered email address |
+    | `password` | string | ✅ | The user's plaintext password (bcrypt-compared server-side) |
+
+    ```bash
+    curl -X POST http://localhost:3000/api/auth/login \
+      -H 'Content-Type: application/json' \
+      -d '{"email": "admin@restaurant.com", "password": "yourpassword"}'
+    ```
+  </Tab>
+  <Tab title="200 — Success">
+    A successful response returns the signed JWT and the full user object. The token should be stored by the client and sent with all subsequent requests.
+
+    ```json
+    {
+      "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6MSwiZW1haWwiOiJhZG1pbkByZXN0YXVyYW50LmNvbSIsInJvbCI6ImFkbWluIiwiaWF0IjoxNzAwMDAwMDAwLCJleHAiOjE3MDAwMjg4MDB9.signature",
+      "user": {
+        "id": 1,
+        "nombre": "Carlos",
+        "apellido": "Flores",
+        "email": "admin@restaurant.com",
+        "rol": "admin",
+        "activo": true
+      }
+    }
+    ```
+
+    | Field | Type | Description |
+    |-------|------|-------------|
+    | `token` | string | Signed JWT — expires in **8 hours** |
+    | `user.id` | number | Primary key from the `usuario` table |
+    | `user.nombre` | string | First name |
+    | `user.apellido` | string | Last name |
+    | `user.email` | string | Email address |
+    | `user.rol` | string | One of `admin`, `cajero`, `mesero`, `cocina` |
+    | `user.activo` | boolean | `true` if the account is active |
+  </Tab>
+  <Tab title="Error Responses">
+    | Status | Condition | Message |
+    |--------|-----------|---------|
+    | `400 Bad Request` | `email` or `password` missing from request body | `"Email y contrasena son requeridos"` |
+    | `401 Unauthorized` | No user found with the given email | `"Usuario no encontrado"` |
+    | `401 Unauthorized` | User's `activo` flag is `false` | `"Usuario inactivo"` |
+    | `401 Unauthorized` | Password does not match the stored bcrypt hash | `"Contrasena incorrecta"` |
+    | `500 Internal Server Error` | Unexpected server-side error | `"Error interno del servidor"` |
+  </Tab>
+</Tabs>
+
+The login controller that handles this endpoint:
+
+```javascript
+// Backend/controllers/authController.js
+const bcrypt = require("bcryptjs")
+const jwt = require("jsonwebtoken")
+const { logAudit } = require("../utils/auditLogger")
+const { findUserByEmail } = require("../models/userModels")
+
+const login = async (req, res) => {
+  const { email, password } = req.body
+
+  try {
+    if (!email || !password) {
+      return res.status(400).json({ message: "Email y contrasena son requeridos" })
+    }
+
+    const user = await findUserByEmail(email)
+
+    if (!user) {
+      return res.status(401).json({ message: "Usuario no encontrado" })
+    }
+
+    if (!user.activo) {
+      return res.status(401).json({ message: "Usuario inactivo" })
+    }
+
+    const validPassword = await bcrypt.compare(password, user.password_hash)
+
+    if (!validPassword) {
+      return res.status(401).json({ message: "Contrasena incorrecta" })
+    }
+
+    const token = jwt.sign(
+      { id: user.id, email: user.email, rol: user.rol },
+      process.env.JWT_SECRET || "secreto",
+      { expiresIn: "8h" }
+    )
+
+    await logAudit(user.id, 'LOGIN', 'usuarios', user.id, `Inicio de sesion: ${user.email}`, req.ip)
+    res.json({
+      token,
+      user: {
+        id: user.id,
+        nombre: user.nombre,
+        apellido: user.apellido,
+        email: user.email,
+        rol: user.rol,
+        activo: Boolean(user.activo)
+      }
+    })
+  } catch (error) {
+    console.error("Error en login:", error)
+    res.status(500).json({ message: "Error interno del servidor" })
+  }
+}
+```
+
+---
+
+## Using the Token
+
+Every protected API endpoint requires the token to be sent in the `Authorization` header using the **Bearer** scheme.
+
+```
+Authorization: Bearer <token>
+```
+
+<Steps>
+  <Step title="Store the token after login">
+    Persist the token (and optionally the user object) in `localStorage` immediately after a successful login response. The SS Restaurant frontend stores both keys `token` and `user`.
+
+    ```typescript
+    // Frontend/src/stores/auth.ts (login action)
+    const data: LoginResponse = await response.json()
+    this.token = data.token
+    this.user = data.user
+
+    localStorage.setItem("token", data.token)
+    localStorage.setItem("user", JSON.stringify(data.user))
+    ```
+  </Step>
+  <Step title="Attach the token to every request">
+    Pass the token in the `Authorization` header. Using `curl`:
+
+    ```bash
+    curl http://localhost:3000/api/orders \
+      -H 'Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...'
+    ```
+
+    In JavaScript, the `apiFetch` utility automatically reads the token from `localStorage` and attaches it to every outgoing request:
+
+    ```typescript
+    // Frontend/src/utils/api.ts
+    const API_BASE = import.meta.env.VITE_API_BASE_URL || '/api'
+
+    export const apiFetch = async (url: string, options: RequestInit = {}) => {
+      const token = localStorage.getItem('token')
+      const baseHeaders: Record<string, string> = {}
+      if (options.headers instanceof Headers) {
+        options.headers.forEach((v, k) => { baseHeaders[k] = v })
+      } else if (options.headers && typeof options.headers === 'object') {
+        Object.assign(baseHeaders, options.headers)
+      }
+      if (token) {
+        baseHeaders['Authorization'] = `Bearer ${token}`
+      }
+      const response = await fetch(url, { ...options, headers: baseHeaders })
+      if (!response.ok) {
+        const error = await response.text()
+        if (response.status === 401) {
+          localStorage.removeItem('token')
+          localStorage.removeItem('user')
+          window.location.href = '/login'
+        }
+        throw new Error(error || response.statusText)
+      }
+      return response.json()
+    }
+
+    export { API_BASE }
+    ```
+  </Step>
+  <Step title="Handle expired or invalid tokens">
+    When the API returns a non-OK response, `apiFetch` inspects the status code. A `401` response automatically clears both `localStorage` keys and redirects the user to `/login`. Your components do not need to handle token expiry explicitly — the utility takes care of it.
+  </Step>
+</Steps>
+
+---
+
+## Token Expiry
+
+Tokens are signed with `expiresIn: "8h"` and include an `exp` claim set 8 hours from the time of issue.
+
+```javascript
+// Backend/controllers/authController.js
+const token = jwt.sign(
+  { id: user.id, email: user.email, rol: user.rol },
+  process.env.JWT_SECRET || "secreto",
+  { expiresIn: "8h" }
+)
+```
+
+When the token has expired, `jwt.verify` in `verifyToken` throws a `TokenExpiredError` and the middleware responds with:
+
+```json
+HTTP 403 Forbidden
+{ "message": "Token inválido o expirado" }
+```
+
+<Warning>
+  The frontend `apiFetch` utility redirects to `/login` on **401** responses. A `403` (expired or malformed token) from `verifyToken` is also treated as a hard failure — the thrown `Error` will surface to your component's catch block. For a seamless session, prompt users to re-authenticate whenever a `403` is received on a protected call.
+</Warning>
+
+<Tip>
+  To check a token's expiry time without making an API call, decode the `exp` claim client-side: `JSON.parse(atob(token.split('.')[1])).exp` returns a Unix timestamp in seconds.
+</Tip>
+
+---
+
+## Active User Check
+
+Login enforces that the user's `activo` column is `true` **before** generating a token. Accounts deactivated in the admin panel receive a `401` immediately — they cannot obtain new tokens. Existing tokens for a deactivated user remain valid until expiry unless `JWT_SECRET` is rotated or the token is otherwise invalidated.
+
+```javascript
+// Backend/controllers/authController.js
+if (!user.activo) {
+  return res.status(401).json({ message: "Usuario inactivo" })
+}
+```
+
+The `activo` field is also returned as a boolean in the login response so the frontend can reflect the account status in the UI.
+
+---
+
+## Audit Logging
+
+Every successful login is written to the audit log via `logAudit` before the response is sent. The log entry records:
+
+| Field | Value |
+|-------|-------|
+| `user_id` | The authenticated user's `id` |
+| `action` | `LOGIN` |
+| `tabla` | `usuarios` |
+| `registro_id` | The user's `id` |
+| `descripcion` | `Inicio de sesion: <email>` |
+| `ip` | Client IP address (resolved via `req.ip`, with `trust proxy` enabled) |
+
+```javascript
+// Backend/controllers/authController.js
+await logAudit(user.id, 'LOGIN', 'usuarios', user.id, `Inicio de sesion: ${user.email}`, req.ip)
+```
+
+<Note>
+  The server sets `app.set("trust proxy", 1)` so that `req.ip` correctly resolves the originating client address when running behind a reverse proxy or load balancer, rather than logging the proxy's IP.
+</Note>
+
+Audit entries are readable at `GET /api/audit` by users with the `admin` role. See the [Roles Overview](/roles/overview) page for the full list of role-protected endpoints.

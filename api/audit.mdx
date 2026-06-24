@@ -1,0 +1,190 @@
+---
+title: "Audit Log API — Track All System Actions"
+sidebarTitle: "Audit"
+description: "GET /api/audit retrieves the audit trail of all significant user actions including logins, order creation, payment processing, and report generation with timestamps and IP addresses."
+---
+
+The Audit Log API exposes the `auditoria` table, which records every significant action performed in the system. Entries are written automatically by the `logAudit` utility function (`utils/auditLogger.js`) at the point of the originating operation — no separate step is required. Each entry captures who performed the action (`usuario_id`), what they did (`accion`), which table was affected (`tabla`), which record (`registro_id`), a plain-text description (`detalle`), and the request IP address (`direccion_ip`). This provides a complete, tamper-evident trail for compliance, debugging, and operational review. All read and write access to the audit log is restricted to the `admin` role.
+
+---
+
+## Automatic logging
+
+The `logAudit` function is called throughout the codebase whenever a state-changing operation completes:
+
+| Trigger | `accion` | `tabla` |
+|---------|----------|---------|
+| User logs in | `LOGIN` | `usuarios` |
+| New order created | `CREAR` | `pedidos` |
+| Order status updated | `ACTUALIZAR` | `pedidos` |
+| Order detail line added | `CREAR` | `detalle_pedido` |
+| Payment processed | `CREAR` | `pagos` |
+| Ticket generated | `CREAR` | `tickets` |
+| Invoice generated | `CREAR` | `facturas` |
+| Report generated | `GENERAR` | `reportes` |
+| Report deleted | `ELIMINAR` | `reportes` |
+| User account created | `CREAR` | `usuarios` |
+| User account updated | `ACTUALIZAR` | `usuarios` |
+| User account deleted | `ELIMINAR` | `usuarios` |
+| Settings updated | `ACTUALIZAR` | `configuracion` |
+
+---
+
+## Endpoints
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `GET` | `/api/audit` | admin | List audit log entries, with optional filters |
+| `POST` | `/api/audit` | admin | Manually record an audit entry |
+
+---
+
+## GET /api/audit
+
+Returns audit log entries joined with the `usuario` table to include the actor's name and email. Without query parameters the full log is returned in descending timestamp order. Combine any of the filter parameters to narrow the results.
+
+**Query parameters**
+
+<ParamField query="accion" type="string">
+  Filter by action type: `LOGIN`, `CREAR`, `ACTUALIZAR`, `ELIMINAR`, or `GENERAR`.
+</ParamField>
+
+<ParamField query="tabla" type="string">
+  Filter by the name of the affected database table (e.g., `pedidos`, `pagos`, `reportes`).
+</ParamField>
+
+<ParamField query="usuario_id" type="number">
+  Filter entries by the ID of the user who performed the action.
+</ParamField>
+
+<ParamField query="desde" type="string">
+  ISO 8601 datetime lower bound for `creado_en` (inclusive). Example: `2025-01-01T00:00:00`.
+</ParamField>
+
+<ParamField query="hasta" type="string">
+  ISO 8601 datetime upper bound for `creado_en` (inclusive). Example: `2025-01-31T23:59:59`.
+</ParamField>
+
+```bash
+# All audit entries
+curl -X GET https://api.example.com/api/audit \
+  -H "Authorization: Bearer <token>"
+
+# Payments by a specific user this month
+curl -X GET "https://api.example.com/api/audit?accion=CREAR&tabla=pagos&usuario_id=2&desde=2025-01-01T00:00:00&hasta=2025-01-31T23:59:59" \
+  -H "Authorization: Bearer <token>"
+```
+
+**Response — array of audit entries:**
+
+```json
+[
+  {
+    "id": 201,
+    "usuario_id": 2,
+    "usuario_nombre": "Ana",
+    "usuario_email": "ana@restaurant.com",
+    "accion": "CREAR",
+    "tabla": "pagos",
+    "registro_id": 15,
+    "detalle": "Pago 15 para pedido 42 - efectivo Bs.120.5",
+    "direccion_ip": "192.168.1.10",
+    "creado_en": "2025-01-15T18:32:01.000Z"
+  }
+]
+```
+
+<ResponseField name="id" type="number">Audit entry primary key.</ResponseField>
+<ResponseField name="usuario_id" type="number">ID of the user who performed the action.</ResponseField>
+<ResponseField name="usuario_nombre" type="string">First name of the acting user (joined from `usuario`).</ResponseField>
+<ResponseField name="usuario_email" type="string">Email of the acting user (joined from `usuario`).</ResponseField>
+<ResponseField name="accion" type="string">
+  Action type: one of `LOGIN`, `CREAR`, `ACTUALIZAR`, `ELIMINAR`, or `GENERAR`.
+</ResponseField>
+<ResponseField name="tabla" type="string">
+  Name of the database table that was affected (e.g., `pedidos`, `pagos`, `usuarios`, `reportes`, `detalle_pedido`).
+</ResponseField>
+<ResponseField name="registro_id" type="number">
+  Primary key of the affected record. May be `null` for actions that do not map to a single row (e.g., settings updates).
+</ResponseField>
+<ResponseField name="detalle" type="string">
+  Human-readable description of the action, e.g., `"Pago 15 para pedido 42 - efectivo Bs.120.5"`.
+</ResponseField>
+<ResponseField name="direccion_ip" type="string">
+  IP address from which the request originated, as captured by `req.ip`.
+</ResponseField>
+<ResponseField name="creado_en" type="string">ISO 8601 timestamp when the entry was recorded.</ResponseField>
+
+---
+
+## POST /api/audit
+
+Manually inserts an audit entry. Intended for administrative tools or integration scripts that perform actions outside the standard API flow and still need to be recorded in the trail.
+
+### Request body
+
+<ParamField body="accion" type="string" required>
+  Action type. Recommended values: `LOGIN`, `CREAR`, `ACTUALIZAR`, `ELIMINAR`, `GENERAR`. Free-form strings are accepted but using the standard vocabulary keeps the log filterable.
+</ParamField>
+
+<ParamField body="tabla" type="string" required>
+  Name of the database table or resource being acted upon.
+</ParamField>
+
+<ParamField body="registro_id" type="number">
+  Primary key of the affected record, if applicable.
+</ParamField>
+
+<ParamField body="detalle" type="string">
+  Plain-text description of what was done.
+</ParamField>
+
+```bash
+curl -X POST https://api.example.com/api/audit \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "accion": "ELIMINAR",
+    "tabla": "reservas",
+    "registro_id": 7,
+    "detalle": "Reserva 7 cancelada manualmente por admin"
+  }'
+```
+
+**Response `201 Created`:**
+
+```json
+{ "message": "Auditoria registrada correctamente" }
+```
+
+### Error responses
+
+| Status | Condition |
+|--------|-----------|
+| `400` | `accion` or `tabla` not provided |
+| `500` | Database or internal error |
+
+---
+
+## Sample audit entry
+
+```json
+{
+  "id": 201,
+  "usuario_id": 2,
+  "usuario_nombre": "Ana",
+  "usuario_email": "ana@restaurant.com",
+  "accion": "CREAR",
+  "tabla": "pagos",
+  "registro_id": 15,
+  "detalle": "Pago 15 para pedido 42 - efectivo Bs.120.5",
+  "direccion_ip": "192.168.1.10",
+  "creado_en": "2025-01-15T18:32:01.000Z"
+}
+```
+
+---
+
+<Note>
+  The `logAudit` utility is designed to be non-blocking — if the audit insert fails (e.g., due to a transient database error), it logs the error to `console.error` but does not throw, so the originating operation is not rolled back. Audit entries are best-effort; they should not be relied upon as the sole source of financial truth.
+</Note>

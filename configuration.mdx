@@ -1,0 +1,173 @@
+---
+title: "Configure SS Restaurant: Environment Variables and Integrations"
+sidebarTitle: "Configuration"
+description: "Complete reference for all Backend environment variables including MySQL connection, JWT settings, ImageKit image uploads, and the Vite frontend API proxy."
+---
+
+SS Restaurant's backend is configured entirely through environment variables loaded from `Backend/.env` via `dotenv`. No value is hard-coded in application logic — with the exception of the JWT secret fallback `"secreto"` which exists only as a development safety net and must never be relied on in production. This page documents every variable, the MySQL connection pool settings, the ImageKit image-upload integration, and the Vite proxy that connects the frontend to the API during development.
+
+## Backend Environment Variables
+
+Create or edit `Backend/.env`. The server reads this file on startup; changes require a restart.
+
+<ParamField body="DB_HOST" type="string" default="localhost">
+  Hostname or IP address of your MySQL 8 server. Use `localhost` for a local instance, or the DNS name / private IP of a remote database host.
+</ParamField>
+
+<ParamField body="DB_USER" type="string" default="root">
+  MySQL username used to authenticate the connection pool. In production, create a dedicated database user with only the permissions your application needs (SELECT, INSERT, UPDATE, DELETE on the `restaurante` database).
+</ParamField>
+
+<ParamField body="DB_PASSWORD" type="string" required>
+  Password for `DB_USER`. There is no default — the connection will fail if this is empty. Always store this value in a secrets manager or injected environment variable in production environments.
+</ParamField>
+
+<ParamField body="DB_NAME" type="string" default="restaurante">
+  Name of the MySQL database. Must match the database you created with `CREATE DATABASE restaurante;` (or your chosen name) before starting the server.
+</ParamField>
+
+<ParamField body="JWT_SECRET" type="string" required>
+  Secret key used by `jsonwebtoken` to sign and verify all authentication tokens. Tokens are issued with an **8-hour expiry** (`expiresIn: "8h"`). If this variable is not set, the server falls back to the literal string `"secreto"` — a critical security risk in any non-development environment. Generate a strong random value with at least 32 bytes of entropy.
+</ParamField>
+
+<ParamField body="PORT" type="number" default="3000">
+  TCP port on which the Express server listens. Override this when running multiple services on the same host or when your hosting platform assigns a dynamic port via this variable.
+</ParamField>
+
+<ParamField body="IMAGEKIT_PUBLIC_KEY" type="string">
+  Your ImageKit account's public API key. Required only when the menu image-upload feature (`POST /api/menu/upload`) is used. Obtain this from the **Developer** section of your ImageKit dashboard.
+</ParamField>
+
+<ParamField body="IMAGEKIT_PRIVATE_KEY" type="string">
+  Your ImageKit account's private API key. Treated as a secret — never expose this in client-side code or logs. Required alongside `IMAGEKIT_PUBLIC_KEY` for image uploads to succeed.
+</ParamField>
+
+<ParamField body="IMAGEKIT_URL_ENDPOINT" type="string">
+  The base URL of your ImageKit media endpoint, for example `https://ik.imagekit.io/your_imagekit_id`. This is prepended to uploaded image paths when constructing the public URL returned to the frontend.
+</ParamField>
+
+---
+
+## MySQL Connection Pool
+
+The database module at `Backend/config/db.js` creates a single shared `mysql2/promise` connection pool that all route handlers reuse:
+
+```js
+// Backend/config/db.js
+const mysql = require("mysql2/promise")
+
+const pool = mysql.createPool({
+  host: process.env.DB_HOST,
+  user: process.env.DB_USER,
+  password: process.env.DB_PASSWORD,
+  database: process.env.DB_NAME,
+  waitForConnections: true,
+  connectionLimit: 10,
+  queueLimit: 0,
+  dateStrings: true
+})
+
+module.exports = pool
+```
+
+Key settings to be aware of:
+
+| Option | Value | Effect |
+|---|---|---|
+| `connectionLimit` | `10` | Maximum number of simultaneous open connections to MySQL. Increase this for high-concurrency deployments; decrease it if your MySQL host enforces strict per-user connection limits. |
+| `waitForConnections` | `true` | New requests queue up instead of throwing an error when all 10 connections are busy. |
+| `queueLimit` | `0` | Unlimited queue depth. Set a positive integer to reject requests when the backlog grows too large. |
+| `dateStrings` | `true` | MySQL `DATE` and `DATETIME` columns are returned as formatted strings (`"YYYY-MM-DD"` / `"YYYY-MM-DD HH:MM:SS"`) rather than JavaScript `Date` objects. This prevents timezone conversion surprises. |
+
+---
+
+## ImageKit Integration
+
+Menu item images are uploaded and served through [ImageKit](https://imagekit.io), a real-time image CDN. The integration lives in two files:
+
+**`Backend/config/imagekit.js`** — initialises the SDK with your credentials:
+
+```js
+// Backend/config/imagekit.js
+const ImageKit = require("imagekit")
+
+const imagekit = new ImageKit({
+  publicKey: process.env.IMAGEKIT_PUBLIC_KEY,
+  privateKey: process.env.IMAGEKIT_PRIVATE_KEY,
+  urlEndpoint: process.env.IMAGEKIT_URL_ENDPOINT
+})
+
+module.exports = imagekit
+```
+
+**Upload route** — `POST /api/menu/upload` (admin only) accepts a `multipart/form-data` request with a single `image` field. The request pipeline is:
+
+1. **multer** buffers the uploaded file in memory.
+2. The controller calls `imagekit.upload()` with the file buffer and a generated filename.
+3. ImageKit stores the image and returns a response containing the `url` of the hosted image.
+4. The controller sends that URL back to the frontend so it can be saved to the `producto` record.
+
+```
+POST /api/menu/upload
+Content-Type: multipart/form-data
+Authorization: Bearer <admin-token>
+
+Form field: image = <binary file>
+
+Response:
+{
+  "url": "https://ik.imagekit.io/your_id/filename.jpg"
+}
+```
+
+If the three `IMAGEKIT_*` variables are not set, the SDK will be instantiated with `undefined` values and upload requests will fail with a 500 error. All other menu operations (create, read, update, delete) continue to work normally without ImageKit configured.
+
+---
+
+## Frontend Vite Proxy
+
+During development, the Vite dev server proxies all requests that begin with `/api` to the Express backend. This means the frontend code can always use relative paths like `/api/menu` without worrying about CORS or absolute URLs.
+
+The proxy is defined in `Frontend/vite.config.ts`:
+
+```ts
+// Frontend/vite.config.ts
+import { fileURLToPath, URL } from 'node:url'
+import { defineConfig } from 'vite'
+import vue from '@vitejs/plugin-vue'
+import vueDevTools from 'vite-plugin-vue-devtools'
+
+export default defineConfig({
+  plugins: [
+    vue(),
+    vueDevTools(),
+  ],
+  resolve: {
+    alias: {
+      '@': fileURLToPath(new URL('./src', import.meta.url))
+    },
+  },
+  server: {
+    proxy: {
+      '/api': {
+        target: 'http://localhost:3000',
+        changeOrigin: true
+      }
+    }
+  }
+})
+```
+
+The `changeOrigin: true` option rewrites the `Host` header so the Express server sees `localhost:3000` instead of `localhost:5173`. No additional CORS configuration is needed during development.
+
+In production builds, deploy the compiled `dist/` output behind a reverse proxy (nginx, Caddy, etc.) that forwards `/api/*` to your Express process — the same path convention applies.
+
+---
+
+## Reverse Proxy Trust Setting
+
+<Note>
+  The Express server sets `app.set("trust proxy", 1)` near the top of `server.js`. This tells Express to trust the first proxy in front of it (e.g., nginx, an AWS ALB, or a Heroku router) when reading the client IP from the `X-Forwarded-For` header.
+
+  This is important for the audit logger, which records `req.ip` for each sensitive action (logins, data changes). Without this setting, `req.ip` would always resolve to the proxy's internal IP rather than the real client address. If you are running Express directly on a public interface with no reverse proxy, you can safely remove this line.
+</Note>

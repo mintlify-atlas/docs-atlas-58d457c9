@@ -1,0 +1,85 @@
+---
+title: "SS Restaurant: Restaurant Management Built for Daily Operations"
+sidebarTitle: "Introduction"
+description: "SS Restaurant is a full-stack platform managing orders, tables, reservations, billing, and reporting for restaurant staff across four distinct roles."
+---
+
+SS Restaurant is a full-stack restaurant management system designed to streamline every aspect of daily restaurant operations — from seating guests and taking orders to processing payments and generating end-of-day reports. Built as a Vue 3 single-page application communicating with an Express 5 REST API backed by MySQL, it gives your front-of-house and back-of-house staff a single, fast, role-aware interface that works entirely inside a browser.
+
+## Architecture Overview
+
+SS Restaurant follows a clean two-tier architecture. The **Frontend SPA** (served by Vite during development or any static host in production) handles all user interaction, routing, and state management, then talks to the **Backend REST API** exclusively over HTTP. There is no server-side rendering — every page transition and data fetch happens client-side, keeping the frontend and backend fully decoupled and independently deployable.
+
+```
+┌─────────────────────────────┐        HTTP / JSON        ┌────────────────────────────┐
+│   Vue 3 SPA (port 5173)     │  ◄──────────────────────► │  Express API (port 3000)   │
+│   Pinia · Vue Router        │        /api/*              │  MySQL2 · JWT · ImageKit   │
+│   Chart.js · Tailwind CSS   │                            │  PDFKit · multer           │
+└─────────────────────────────┘                            └────────────┬───────────────┘
+                                                                        │
+                                                             ┌──────────▼──────────┐
+                                                             │  MySQL 8 Database   │
+                                                             └─────────────────────┘
+```
+
+During local development the Vite dev server proxies all `/api` requests to `http://localhost:3000`, so the frontend never needs to know the backend's absolute URL.
+
+## Key Capabilities
+
+<CardGroup cols={2}>
+  <Card title="Order Management" icon="receipt" href="/features/orders">
+    Create, update, and track dine-in and reservation-linked orders in real time. Waitstaff and cashiers each see only the actions available to their role.
+  </Card>
+  <Card title="Tables & Reservations" icon="chair" href="/features/tables-reservations">
+    Manage table availability and capacity. Accept walk-ins or pre-booked reservations and convert them to live orders in one click.
+  </Card>
+  <Card title="Menu Management" icon="utensils" href="/features/menu">
+    Organise menu items into categories, set prices, and attach photos via ImageKit. All changes are instantly visible to staff and to the public menu endpoint.
+  </Card>
+  <Card title="Billing & Invoicing" icon="file-invoice-dollar" href="/features/billing">
+    Process payments, generate PDF receipts with PDFKit, and issue formal invoices — all restricted to cashier and admin roles.
+  </Card>
+  <Card title="Reports & Audit" icon="chart-bar" href="/features/reports">
+    View sales summaries and trend charts (powered by Chart.js) and inspect the full audit log of every sensitive action performed in the system.
+  </Card>
+  <Card title="Role-Based Access" icon="shield-halved" href="/roles/overview">
+    Four roles — **admin**, **cajero** (cashier), **mesero** (waiter), and **cocinero** (kitchen) — each with a scoped set of permitted API operations.
+  </Card>
+</CardGroup>
+
+## Tech Stack
+
+### Frontend
+
+| Package | Version | Purpose |
+|---|---|---|
+| Vue 3 | ^3.5 | Reactive component framework |
+| Pinia | ^3.0 | Global state management |
+| Vue Router | ^4.6 | Client-side routing & navigation guards |
+| Chart.js + vue-chartjs | ^4.5 / ^5.3 | Dashboard charts and trend graphs |
+| Tailwind CSS | ^4.2 | Utility-first styling |
+| SweetAlert2 | ^11.26 | Modal dialogs and confirmations |
+
+### Backend
+
+| Package | Version | Purpose |
+|---|---|---|
+| Express | ^5.2 | HTTP server and routing |
+| mysql2 | ^3.20 | Promise-based MySQL driver with connection pooling |
+| bcryptjs | ^3.0 | Password hashing |
+| jsonwebtoken | ^9.0 | JWT generation and verification (8 h expiry) |
+| multer | ^2.1 | Multipart file uploads |
+| imagekit | ^6.0 | Cloud image storage and CDN delivery |
+| PDFKit | ^0.19 | Server-side PDF generation for tickets and invoices |
+| dotenv | ^17.4 | Environment variable loading |
+
+## Public Endpoints
+
+<Note>
+  Two API routes intentionally bypass JWT authentication and are safe to call from any unauthenticated client — including your restaurant's public website or a kiosk:
+
+  - **`GET /api/public/menu`** — returns the full list of active menu items and categories.
+  - **`POST /api/public/reservations`** — accepts a guest reservation request without requiring login.
+
+  All other `/api/*` routes require a valid `Authorization: Bearer <token>` header.
+</Note>

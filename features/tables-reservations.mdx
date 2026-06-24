@@ -1,0 +1,194 @@
+---
+title: "Table and Reservation Management"
+sidebarTitle: "Tables & Reservations"
+description: "Manage physical table states and advance reservations with automatic table assignment, conflict detection, and one-click conversion to active orders."
+---
+
+SS Restaurant models the dining room as a set of **mesas** (tables), each with a live status that reflects its real-world condition. On top of that, the reservation system lets guests book a specific table in advance — or have one auto-assigned — and allows staff to convert confirmed reservations into active orders with a single API call. Conflict detection runs on every reservation write to prevent double-booking.
+
+## Table states
+
+Every table carries exactly one of three states at any given moment.
+
+| State | Colour in UI | Meaning |
+|---|---|---|
+| `libre` | Green | Table is clean and unoccupied; can accept a new order or reservation |
+| `ocupada` | Red | An active order (status `pendiente`, `preparando`, or `listo`) is running on this table |
+| `mantenimiento` | Amber | Table is out of service (cleaning, repairs, event setup); excluded from auto-assignment |
+
+The state transitions to `ocupada` automatically when an order is created and back to `libre` when an order is delivered or cancelled. Staff can also override the state manually via the quick-status panel in the Tables view.
+
+## Table management
+
+Full CRUD is available under `/api/tables`. All routes require authentication; deletion and creation require **admin** role.
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/tables` | List all tables with live `tiene_pedido_activo` flag |
+| `GET` | `/api/tables/disponibles` | List only tables with `estado = 'libre'` |
+| `GET` | `/api/tables/:id` | Get a single table |
+| `POST` | `/api/tables` | Create a table (admin) |
+| `PUT` | `/api/tables/:id` | Full update — number, capacity, and state (admin) |
+| `PATCH` | `/api/tables/:id/estado` | Status-only update |
+| `DELETE` | `/api/tables/:id` | Delete a table (admin) |
+
+**Creating a table:**
+
+```json
+POST /api/tables
+Content-Type: application/json
+
+{
+  "numero": "T5",
+  "capacidad": 4
+}
+```
+
+**Changing table status only:**
+
+```json
+PATCH /api/tables/5/estado
+Content-Type: application/json
+
+{
+  "estado": "mantenimiento"
+}
+```
+
+Valid `estado` values: `libre`, `ocupada`, `mantenimiento`. Any other value returns `400`.
+
+## Reservation workflow
+
+<Steps>
+  <Step title="Create a reservation">
+    POST to `/api/reservations` (authenticated staff) or `POST /api/public/reservations` (no auth required — for online booking forms). Required fields: `mesa_id`, `fecha_hora_inicio`, `fecha_hora_fin`, `cantidad_personas`. The system runs conflict detection before inserting. Initial `estado` is always `pendiente`.
+  </Step>
+  <Step title="Confirm the reservation">
+    When the restaurant acknowledges the booking, patch the state to `confirmada`:
+
+    ```json
+    PATCH /api/reservations/17/estado
+    Content-Type: application/json
+
+    {
+      "estado": "confirmada"
+    }
+    ```
+  </Step>
+  <Step title="Convert to an active order">
+    When the guests arrive, convert the reservation to a live order. This marks the reservation `completada`, marks the table `ocupada`, and creates the `pedido` in a single transaction:
+
+    ```json
+    POST /api/reservations/17/convertir-pedido
+    Content-Type: application/json
+
+    {
+      "mesero_id": 7,
+      "observaciones": "Ocasión de cumpleaños",
+      "metodo_pago": null,
+      "items": [
+        { "producto_id": 3, "cantidad": 2 },
+        { "producto_id": 11, "cantidad": 4 }
+      ]
+    }
+    ```
+
+    The response includes the new order ID:
+
+    ```json
+    {
+      "id": 91,
+      "message": "Pedido creado correctamente desde la reservacion"
+    }
+    ```
+
+    <Note>
+      The reservation must be in `confirmada` or `pendiente` state. Attempting to convert a `cancelada` or `completada` reservation returns `400`.
+    </Note>
+  </Step>
+</Steps>
+
+## Public reservation endpoint
+
+The public endpoint is mounted at `/api/public/reservations` and requires **no authentication**. It is designed for embedding on the restaurant's website or a customer-facing booking widget.
+
+```json
+POST /api/public/reservations
+Content-Type: application/json
+
+{
+  "nombre": "Ana Torres",
+  "telefono": "77712345",
+  "email": "ana@example.com",
+  "fecha_hora_inicio": "2025-07-20T19:00",
+  "fecha_hora_fin": "2025-07-20T21:00",
+  "cantidad_personas": 3,
+  "mesa_id": null,
+  "observaciones": "Preferimos terraza"
+}
+```
+
+| Field | Required | Notes |
+|---|---|---|
+| `nombre` | ✅ | Used to create a `cliente` record |
+| `telefono` | ✅ | Used to create a `cliente` record |
+| `fecha_hora_inicio` | ✅ | ISO-like datetime string `YYYY-MM-DDTHH:mm` |
+| `fecha_hora_fin` | ✅ | ISO-like datetime string `YYYY-MM-DDTHH:mm` |
+| `cantidad_personas` | ✅ | Minimum seating required |
+| `mesa_id` | Optional | If omitted, the system auto-assigns the smallest available table with sufficient capacity |
+| `email` | Optional | Stored on the customer record |
+| `observaciones` | Optional | Notes passed to the reservation |
+
+If `mesa_id` is omitted and no suitable table is free in the requested window, the API responds with `400 No hay mesas disponibles en ese horario`.
+
+## Conflict detection
+
+`checkTableAvailability` runs before every reservation insert or update. It queries for overlapping active reservations:
+
+```
+estado IN ('pendiente', 'confirmada')
+AND :fecha_hora_inicio < r.fecha_hora_fin
+AND :fecha_hora_fin > r.fecha_hora_inicio
+```
+
+A conflict returns `409 La mesa ya esta reservada en ese horario`. When updating an existing reservation the current reservation's ID is excluded from the conflict check.
+
+## Querying available tables
+
+Use `GET /api/reservations/mesas-disponibles` to get a list of tables that are free for a given time window and have enough capacity. All three parameters are mandatory.
+
+```
+GET /api/reservations/mesas-disponibles
+  ?fecha_hora_inicio=2025-07-20T19:00
+  &fecha_hora_fin=2025-07-20T21:00
+  &cantidad_personas=3
+```
+
+**Response:**
+
+```json
+[
+  { "id": 2, "numero": 2, "capacidad": 4 },
+  { "id": 7, "numero": 7, "capacidad": 6 }
+]
+```
+
+Tables with `estado = 'mantenimiento'` are excluded from results.
+
+## Reservation states
+
+| State | Description |
+|---|---|
+| `pendiente` | Created but not yet acknowledged by staff |
+| `confirmada` | Staff has confirmed the booking |
+| `cancelada` | Cancelled by staff or guest; releases the table if no active orders exist |
+| `completada` | Converted to an order or manually closed |
+| `no_asistio` | Auto-assigned by a scheduled check when `fecha_hora_fin` passes without the reservation being converted |
+
+<Tip>
+  The `GET /api/reservations` endpoint automatically calls `markExpiredNoShow` before returning results, so any reservation whose end-time has passed while still `pendiente` or `confirmada` is silently transitioned to `no_asistio` before the response is sent.
+</Tip>
+
+<Warning>
+  Cancelling a reservation only releases the table to `libre` if there are **no** active orders (in `pendiente`, `preparando`, or `listo` state) still running on that table. If active orders exist, the table state is left unchanged.
+</Warning>

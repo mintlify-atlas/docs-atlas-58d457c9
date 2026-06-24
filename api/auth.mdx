@@ -1,0 +1,110 @@
+---
+title: "Authentication API — POST /api/auth/login"
+sidebarTitle: "Auth"
+description: "POST /api/auth/login authenticates a user with email and password, returning a signed JWT valid for 8 hours and the full user profile object."
+---
+
+The Authentication API provides a single login endpoint that validates a user's email and password against hashed credentials stored in the database. On success it returns a signed JSON Web Token (JWT) and the full user profile. Every other protected endpoint in the SS Restaurant API requires this token in the `Authorization` header.
+
+---
+
+## POST /api/auth/login
+
+Authenticate a user and receive a JWT. No prior authentication is required to call this endpoint.
+
+**`POST /api/auth/login`**
+
+### Request body
+
+<ParamField body="email" type="string" required>
+  The registered email address of the user.
+</ParamField>
+
+<ParamField body="password" type="string" required>
+  The user's plain-text password. It is compared against the stored bcrypt hash server-side.
+</ParamField>
+
+### Response fields
+
+<ResponseField name="token" type="string">
+  A signed HS256 JWT. Valid for **8 hours** from the moment of issue. Pass this value in the `Authorization: Bearer <token>` header on all protected requests.
+</ResponseField>
+
+<ResponseField name="user" type="object">
+  The authenticated user's profile.
+
+  <Expandable title="user object">
+    <ResponseField name="id" type="number">
+      Unique numeric identifier of the user record.
+    </ResponseField>
+    <ResponseField name="nombre" type="string">
+      User's first name.
+    </ResponseField>
+    <ResponseField name="apellido" type="string">
+      User's last name.
+    </ResponseField>
+    <ResponseField name="email" type="string">
+      The email address used to log in.
+    </ResponseField>
+    <ResponseField name="rol" type="string">
+      The user's role. One of `admin`, `mesero`, `cajero`, or `cocina`.
+    </ResponseField>
+    <ResponseField name="activo" type="boolean">
+      `true` if the account is active. Inactive accounts are rejected at login.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+### Error responses
+
+| Status | Condition |
+|--------|-----------|
+| `400 Bad Request` | `email` or `password` field is missing from the request body. |
+| `401 Unauthorized` | User not found for the given email address. |
+| `401 Unauthorized` | Password does not match the stored hash. |
+| `401 Unauthorized` | User account exists but `activo` is `false`. |
+| `500 Internal Server Error` | Unexpected server-side error. |
+
+---
+
+### Example request
+
+```bash
+curl -X POST https://your-api-host/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "admin@ssrestaurant.com",
+    "password": "superSecret42"
+  }'
+```
+
+### Example response
+
+```json
+{
+  "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6MSwiZW1haWwiOiJhZG1pbkBzc3Jlc3RhdXJhbnQuY29tIiwicm9sIjoiYWRtaW4iLCJpYXQiOjE3MTAwMDAwMDAsImV4cCI6MTcxMDAyODgwMH0.abc123signature",
+  "user": {
+    "id": 1,
+    "nombre": "Carlos",
+    "apellido": "Mendoza",
+    "email": "admin@ssrestaurant.com",
+    "rol": "admin",
+    "activo": true
+  }
+}
+```
+
+---
+
+## Using the token
+
+<Note>
+  Include the token in the `Authorization` header of **every** request to a protected endpoint. Tokens expire after 8 hours; your client must re-authenticate after expiry.
+</Note>
+
+```bash
+curl https://your-api-host/api/orders \
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+```
+
+The JWT payload embeds the user's `id`, `email`, and `rol`. Role-based middleware on protected routes reads these claims directly — no additional lookup is needed for basic authorization.

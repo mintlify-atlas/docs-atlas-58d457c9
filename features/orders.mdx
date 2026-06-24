@@ -1,0 +1,222 @@
+---
+title: "Order Management in SS Restaurant"
+sidebarTitle: "Orders"
+description: "Create and manage restaurant orders from table assignment through kitchen preparation to delivery, with real-time status updates and integrated payment flow."
+---
+
+Every transaction in SS Restaurant begins with a **pedido** (order). When a waiter opens a new order it is immediately linked to a physical table, optionally to a reservation that exists for that table today, and to the waiter who is serving it. From that moment the order travels through a well-defined service pipeline — kitchen staff advance it toward preparation and delivery, while cashiers handle payment at the end. Every step is recorded in the audit log and triggers a real-time notification to the appropriate role.
+
+## Order status flow
+
+Orders carry two independent status fields:
+
+- **`estado_servicio`** — tracks where the order is in the service pipeline.
+- **`estado_pago`** — tracks whether it has been paid (`pendiente` → `pagado`).
+
+The API uses English values for `estado_servicio` transitions; the database stores Spanish equivalents.
+
+| API value (`status`) | Database value (`estado_servicio`) | Meaning |
+|---|---|---|
+| `pending` | `pendiente` | Order placed, not yet started in kitchen |
+| `preparing` | `preparando` | Kitchen is actively working on it |
+| `ready` | `listo` | Ready on the pass, waiting for the waiter |
+| `delivered` | `entregado` | Delivered to the table |
+| `cancelled` | `cancelado` | Order voided |
+
+<Steps>
+  <Step title="pending">
+    Order is created and the table is marked **ocupada** automatically.
+  </Step>
+  <Step title="preparing">
+    Kitchen staff advance the order when preparation begins.
+  </Step>
+  <Step title="ready">
+    Kitchen marks the order ready; a notification is sent to the waiter role.
+  </Step>
+  <Step title="delivered / cancelled">
+    Completing or cancelling the order marks the table back to **libre**.
+  </Step>
+</Steps>
+
+## Role permissions
+
+<CardGroup cols={3}>
+  <Card title="Create orders" icon="plus">
+    Roles **admin**, **mesero**, and **cajero** may call `POST /api/orders`.
+  </Card>
+  <Card title="Edit items" icon="pencil">
+    Roles **admin** and **mesero** may call `PUT /api/orders/:id/items` and `DELETE /api/orders/:id/items/:itemId`.
+  </Card>
+  <Card title="Update status" icon="arrow-right">
+    All authenticated roles can call `PUT /api/orders/:id/status`. The Vue frontend additionally enforces per-role transitions: kitchen can advance to `preparing`, waiters can mark `ready`, admins can do any transition.
+  </Card>
+</CardGroup>
+
+## Creating an order
+
+Send a `POST` request to `/api/orders`. The `mesa_id`, `mesero_id`, and at least one item are required.
+
+```json
+POST /api/orders
+Content-Type: application/json
+
+{
+  "mesa_id": 3,
+  "mesero_id": 7,
+  "cliente_id": null,
+  "reserva_id": null,
+  "observaciones": "Sin cebolla en el lomo",
+  "metodo_pago": null,
+  "items": [
+    {
+      "producto_id": 12,
+      "cantidad": 2,
+      "precio_unitario": 45.00,
+      "observaciones": null
+    },
+    {
+      "producto_id": 5,
+      "cantidad": 1,
+      "precio_unitario": 18.50,
+      "observaciones": "Bien cocido"
+    }
+  ]
+}
+```
+
+**Successful response (201):**
+
+```json
+{
+  "id": 84,
+  "message": "Pedido creado correctamente"
+}
+```
+
+| Field | Required | Description |
+|---|---|---|
+| `mesa_id` | ✅ | ID of the table |
+| `mesero_id` | ✅ | ID of the waiter |
+| `items` | ✅ | Array with at least one element |
+| `items[].producto_id` | ✅ | Product ID from the menu |
+| `items[].cantidad` | ✅ | Quantity (integer ≥ 1) |
+| `items[].precio_unitario` | Optional | Overrides the current product price if provided |
+| `items[].observaciones` | Optional | Per-item notes for kitchen |
+| `cliente_id` | Optional | Link to an existing customer record |
+| `reserva_id` | Optional | Explicitly link a reservation |
+| `observaciones` | Optional | General order notes |
+| `metodo_pago` | Optional | Passing a valid payment method here also creates a payment record immediately and marks the order `pagado` |
+
+<Tip>
+  If `metodo_pago` is provided on creation, a `pago` row is inserted and `estado_pago` is set to `'pagado'` in the same database transaction — useful for walk-in customers who pay upfront.
+</Tip>
+
+## Managing order items
+
+Use `PUT /api/orders/:id/items` to add new products or update quantities on an existing order. Pass each item with either an `id` (to update an existing detail row) or no `id` (to insert a new row).
+
+```json
+PUT /api/orders/84/items
+Content-Type: application/json
+
+{
+  "items": [
+    {
+      "id": 201,
+      "producto_id": 12,
+      "cantidad": 3
+    },
+    {
+      "producto_id": 9,
+      "cantidad": 1
+    }
+  ]
+}
+```
+
+To remove a single item line, use:
+
+```
+DELETE /api/orders/:id/items/:itemId
+```
+
+## Updating order status
+
+```json
+PUT /api/orders/84/status
+Content-Type: application/json
+
+{
+  "status": "preparing"
+}
+```
+
+Valid values for `status`: `pending`, `preparing`, `ready`, `delivered`, `cancelled`.
+
+**Successful response:**
+
+```json
+{
+  "message": "Estado del pedido actualizado"
+}
+```
+
+<Warning>
+  Passing `delivered` or `cancelled` automatically changes the associated table's `estado` to `libre`. Make sure no other active orders exist on that table before cancelling.
+</Warning>
+
+## Automatic behaviors
+
+The order controller performs several side-effects automatically within a single database transaction:
+
+- **Table occupation** — Creating any order sets the table's `estado` to `'ocupada'`.
+- **Table liberation** — Transitioning to `entregado` or `cancelado` sets the table back to `'libre'`.
+- **Reservation detection** — If no `reserva_id` is supplied, the system queries for a `confirmada` or `pendiente` reservation for that table dated today and links it automatically.
+- **Reservation completion** — Once a reservation is linked to a new order, its `estado` is updated to `'completada'`.
+
+## Notifications
+
+Every status transition fires a `createNotification` call with a destination role:
+
+| Status | Notification destination |
+|---|---|
+| `pending` | `cocina` (kitchen) |
+| `preparing` | `cocina` (kitchen) |
+| `ready` | `mesero` (waiter) |
+| `delivered` | `admin` |
+
+Notification failures are logged but do not roll back the status update.
+
+## Sales statistics
+
+The `GET /api/orders/stats` endpoint powers the dashboard charts. Use the optional `range` query parameter to switch between weekly and monthly views.
+
+```
+GET /api/orders/stats?range=week
+GET /api/orders/stats?range=month
+```
+
+**Response shape:**
+
+```json
+{
+  "weekly": [
+    { "day": "Lun", "sales": 1250.50, "date": "2025-01-06" },
+    { "day": "Mar", "sales": 980.00, "date": "2025-01-07" }
+  ],
+  "topProducts": [
+    { "name": "Lomo Saltado", "quantity": 34, "value": 1530.00 }
+  ],
+  "today": {
+    "orders": 12,
+    "sales": 640.75
+  },
+  "categories": [
+    { "categoria": "Platos de fondo", "total_ventas": 3200.00 }
+  ]
+}
+```
+
+<Note>
+  When `range=week` the `day` field uses abbreviated day names (Lun, Mar, …). When `range=month` the `day` field is the numeric day of the month as a string ("1", "2", …).
+</Note>

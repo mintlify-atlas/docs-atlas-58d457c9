@@ -1,0 +1,192 @@
+---
+title: "Menu and Product Management"
+sidebarTitle: "Menu"
+description: "Manage menu categories and products, toggle item availability, and upload product images via ImageKit — all accessible to admin role through the dashboard."
+---
+
+The menu system in SS Restaurant is organised into two layers: **categories** (`categoria_producto`) and **products** (`producto`). Admins manage the full catalogue through the dashboard — creating categories, adding and editing products, uploading images to ImageKit, and toggling availability in real time. Authenticated staff can read all products; the unauthenticated public endpoint only exposes items that are currently available.
+
+## Category management
+
+Categories group related products on the menu display. The full category list is readable by any authenticated user; only **admin** may create, update, or delete categories.
+
+| Method | Path | Auth |
+|---|---|---|
+| `GET` | `/api/menu/categorias` | Any role |
+| `POST` | `/api/menu/categorias` | admin only |
+
+**Creating a category:**
+
+```json
+POST /api/menu/categorias
+Content-Type: application/json
+
+{
+  "nombre": "Bebidas Calientes"
+}
+```
+
+**Response (201):**
+
+```json
+{
+  "message": "Categoria creada correctamente",
+  "id": 8
+}
+```
+
+Category names must be unique. Attempting to create a duplicate returns `400 La categoria ya existe`.
+
+**Sample category list response:**
+
+```json
+[
+  { "id": 1, "nombre": "Entradas" },
+  { "id": 2, "nombre": "Platos de fondo" },
+  { "id": 3, "nombre": "Bebidas" },
+  { "id": 8, "nombre": "Bebidas Calientes" }
+]
+```
+
+## Product management
+
+Products are the individual menu items ordered by customers.
+
+| Method | Path | Auth |
+|---|---|---|
+| `GET` | `/api/menu` | Any authenticated role |
+| `POST` | `/api/menu` | admin only |
+| `PUT` | `/api/menu/:id` | admin only |
+| `DELETE` | `/api/menu/:id` | admin only |
+
+**Creating a product:**
+
+```json
+POST /api/menu
+Content-Type: application/json
+
+{
+  "nombre": "Lomo Saltado",
+  "precio": 65.00,
+  "categoria_id": 2,
+  "descripcion": "Clásico salteado de lomo fino con papas fritas y arroz",
+  "disponible": true,
+  "imagen_url": null
+}
+```
+
+| Field | Required | Description |
+|---|---|---|
+| `nombre` | ✅ | Product name |
+| `precio` | ✅ | Price in Bolivianos |
+| `categoria_id` | Optional | Must reference an existing category; `null` = uncategorised |
+| `descripcion` | Optional | Displayed on product cards |
+| `disponible` | Optional | Defaults to `true` |
+| `imagen_url` | Optional | Full URL returned by the upload endpoint |
+
+**Full product object as returned by the API:**
+
+```json
+{
+  "id": 12,
+  "categoria_id": 2,
+  "categoria_nombre": "Platos de fondo",
+  "nombre": "Lomo Saltado",
+  "descripcion": "Clásico salteado de lomo fino con papas fritas y arroz",
+  "precio": "65.00",
+  "imagen_url": "https://ik.imagekit.io/yourproject/RestauranteSS/menu/1720000000_lomo.jpg",
+  "disponible": true,
+  "creado_en": "2025-01-15T14:32:00.000Z"
+}
+```
+
+## Image uploads
+
+Product images are stored on ImageKit under the folder `/RestauranteSS/menu/`. Upload before creating or updating a product, then pass the returned URL as `imagen_url`.
+
+```
+POST /api/menu/upload
+Authorization: Bearer <token>
+Content-Type: multipart/form-data
+
+image: <file>
+```
+
+Constraints enforced by the server:
+
+- Only MIME types starting with `image/` are accepted.
+- Maximum file size: **3 MB**.
+- The frontend automatically resizes images to a maximum of 800 × 600 px at 80 % JPEG quality before uploading.
+
+**Response (201):**
+
+```json
+{
+  "imageUrl": "https://ik.imagekit.io/yourproject/RestauranteSS/menu/1720000000_lomo_saltado.jpg",
+  "path": "https://ik.imagekit.io/yourproject/RestauranteSS/menu/1720000000_lomo_saltado.jpg",
+  "fileId": "abc123def456"
+}
+```
+
+Store the `path` value as the `imagen_url` on the product record.
+
+<Warning>
+  The upload route (`POST /api/menu/upload`) requires **admin** role. Uploading without the correct role returns `403 Forbidden`.
+</Warning>
+
+## Availability toggle
+
+Each product has a boolean `disponible` field. Setting it to `false` hides the product from the public menu endpoint without deleting it. Staff can see all products regardless of availability via `GET /api/menu`.
+
+The Vue dashboard provides a one-click **Agotar / Activar** toggle on every product card which calls `PUT /api/menu/:id` with the flipped `disponible` value while preserving all other fields.
+
+```json
+PUT /api/menu/12
+Content-Type: application/json
+
+{
+  "nombre": "Lomo Saltado",
+  "precio": 65.00,
+  "categoria_id": 2,
+  "descripcion": "Clásico salteado de lomo fino con papas fritas y arroz",
+  "disponible": false
+}
+```
+
+<Tip>
+  Use the availability toggle at the end of the night when an ingredient runs out rather than deleting the product. The product reappears on the public menu as soon as `disponible` is set back to `true`.
+</Tip>
+
+## Public menu endpoint
+
+The public menu is available without authentication and is intended for customer-facing displays or the restaurant's website.
+
+```
+GET /api/public/menu
+```
+
+This endpoint returns **only products with `disponible = true`** along with the full category list. No authentication header is required.
+
+**Response shape:**
+
+```json
+{
+  "categorias": [
+    { "id": 1, "nombre": "Entradas" },
+    { "id": 2, "nombre": "Platos de fondo" }
+  ],
+  "productos": [
+    {
+      "id": 12,
+      "categoria_id": 2,
+      "categoria_nombre": "Platos de fondo",
+      "nombre": "Lomo Saltado",
+      "descripcion": "Clásico salteado de lomo fino con papas fritas y arroz",
+      "precio": "65.00",
+      "imagen_url": "https://ik.imagekit.io/yourproject/RestauranteSS/menu/1720000000_lomo.jpg",
+      "disponible": true,
+      "creado_en": "2025-01-15T14:32:00.000Z"
+    }
+  ]
+}
+```

@@ -1,0 +1,250 @@
+---
+title: "Payments API — Process and Query Order Payments"
+sidebarTitle: "Payments"
+description: "POST /api/payments processes a payment for an order, marks it as paid, and optionally generates a ticket or invoice. Restricted to admin and cajero roles."
+---
+
+The Payments API records monetary transactions against existing orders. Each call to `POST /api/payments` inserts a row into the `pago` table, recalculates the running total paid for the order, and flips `estado_pago` to `pagado` once the cumulative amount meets or exceeds the order total. In the same atomic transaction the endpoint can optionally create a sale ticket (`ticket`) and a tax invoice (`factura`) so that a full cashier workflow requires only a single HTTP request. All write operations are restricted to the `admin` and `cajero` roles; read endpoints are accessible to any authenticated user.
+
+---
+
+## Endpoints
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `GET` | `/api/payments` | Any | List all payments, optionally filtered by order |
+| `GET` | `/api/payments/resumen-diario` | Any | Today's payment totals broken down by method |
+| `GET` | `/api/payments/:id` | Any | Get a single payment record by its ID |
+| `POST` | `/api/payments` | admin, cajero | Process a payment for an order |
+
+---
+
+## GET /api/payments
+
+Returns every payment record joined with its parent order and table number. Pass `?pedido_id=` to filter results to a specific order.
+
+**Query parameters**
+
+<ParamField query="pedido_id" type="number">
+  Filter payments to a single order. Omit to retrieve all payments.
+</ParamField>
+
+```bash
+# All payments
+curl -X GET https://api.example.com/api/payments \
+  -H "Authorization: Bearer <token>"
+
+# Payments for order 42
+curl -X GET "https://api.example.com/api/payments?pedido_id=42" \
+  -H "Authorization: Bearer <token>"
+```
+
+**Response** — array of payment objects:
+
+```json
+[
+  {
+    "id": 15,
+    "pedido_id": 42,
+    "metodo": "efectivo",
+    "monto": 120.50,
+    "referencia": null,
+    "fecha": "2025-01-15T18:32:00.000Z",
+    "estado_pago": "pagado",
+    "mesa_numero": 3
+  }
+]
+```
+
+---
+
+## GET /api/payments/resumen-diario
+
+Returns today's payment totals grouped by payment method. Useful for end-of-day cash reconciliation.
+
+```bash
+curl -X GET https://api.example.com/api/payments/resumen-diario \
+  -H "Authorization: Bearer <token>"
+```
+
+**Response** — array of daily summary entries, one per method used today:
+
+```json
+[
+  { "metodo": "efectivo",      "cantidad_pagos": 12, "total_metodo": 980.00 },
+  { "metodo": "tarjeta",       "cantidad_pagos": 5,  "total_metodo": 430.50 },
+  { "metodo": "qr",            "cantidad_pagos": 3,  "total_metodo": 215.00 },
+  { "metodo": "transferencia", "cantidad_pagos": 1,  "total_metodo": 75.00  }
+]
+```
+
+<ResponseField name="metodo" type="string">
+  Payment method: `efectivo`, `tarjeta`, `qr`, or `transferencia`.
+</ResponseField>
+<ResponseField name="cantidad_pagos" type="number">
+  Number of individual payment transactions made with this method today.
+</ResponseField>
+<ResponseField name="total_metodo" type="number">
+  Sum of all amounts collected via this method today, in Bolivianos (Bs).
+</ResponseField>
+
+---
+
+## GET /api/payments/:id
+
+Fetches a single payment record by primary key. Returns `404` if the record does not exist.
+
+```bash
+curl -X GET https://api.example.com/api/payments/15 \
+  -H "Authorization: Bearer <token>"
+```
+
+**Response:**
+
+```json
+{
+  "id": 15,
+  "pedido_id": 42,
+  "metodo": "efectivo",
+  "monto": 120.50,
+  "referencia": null,
+  "fecha": "2025-01-15T18:32:00.000Z"
+}
+```
+
+---
+
+## POST /api/payments
+
+Processes a payment for an existing order. This is a transactional operation: the payment is inserted, the running total for the order is recalculated, and the order's `estado_pago` is updated — all in a single database transaction. If `generar_ticket` or `generar_factura` are set, the corresponding documents are created in the same transaction only when the order becomes fully paid.
+
+### Request body
+
+<ParamField body="pedido_id" type="number" required>
+  The ID of the order being paid.
+</ParamField>
+
+<ParamField body="monto" type="number" required>
+  Amount to apply to this payment, in Bolivianos (Bs). Partial payments are allowed; the order status transitions to `pagado` once the cumulative total meets or exceeds the order total.
+</ParamField>
+
+<ParamField body="metodo" type="string" required>
+  Payment method. Must be one of: `efectivo`, `tarjeta`, `qr`, `transferencia`.
+</ParamField>
+
+<ParamField body="referencia" type="string">
+  Optional transaction reference — e.g., card authorization code, QR transaction ID, or bank transfer number.
+</ParamField>
+
+<ParamField body="generar_ticket" type="boolean">
+  When `true` and the order becomes fully paid, a sale ticket is automatically generated and included in the response. If the order already has a ticket, the existing ticket is returned. Defaults to `false`.
+</ParamField>
+
+<ParamField body="generar_factura" type="boolean">
+  When `true` and the order becomes fully paid, a tax invoice (factura) is automatically generated. Requires `nit_ci` and `razon_social`. Defaults to `false`.
+</ParamField>
+
+<ParamField body="nit_ci" type="string">
+  Taxpayer NIT or personal CI number. Required when `generar_factura` is `true`.
+</ParamField>
+
+<ParamField body="razon_social" type="string">
+  Legal name or business name for the invoice. Required when `generar_factura` is `true`.
+</ParamField>
+
+### Response
+
+<ResponseField name="message" type="string">
+  Human-readable confirmation: `"Pago registrado"`.
+</ResponseField>
+<ResponseField name="paymentId" type="number">
+  The auto-generated primary key of the new payment record.
+</ResponseField>
+<ResponseField name="estado_pago" type="string">
+  Updated payment status for the order: `pendiente` if more payment is still owed, `pagado` if the order is fully covered.
+</ResponseField>
+<ResponseField name="totalPagado" type="number">
+  Cumulative amount paid against this order so far, in Bolivianos (Bs).
+</ResponseField>
+<ResponseField name="ticket" type="object">
+  Present only when `generar_ticket: true` was passed and the order is now `pagado`.
+
+  <Expandable title="ticket fields">
+    <ResponseField name="id" type="number">Ticket primary key.</ResponseField>
+    <ResponseField name="numero_ticket" type="string">Formatted ticket number, e.g. `20250115-0001`.</ResponseField>
+    <ResponseField name="numero_diario" type="number">Sequential counter for the day (1, 2, 3 …).</ResponseField>
+    <ResponseField name="fecha" type="string">Date the ticket was issued (`YYYY-MM-DD`).</ResponseField>
+  </Expandable>
+</ResponseField>
+<ResponseField name="factura" type="object">
+  Present only when `generar_factura: true` was passed, the order is `pagado`, and `nit_ci` / `razon_social` were provided.
+
+  <Expandable title="factura fields">
+    <ResponseField name="id" type="number">Invoice primary key.</ResponseField>
+    <ResponseField name="numero_factura" type="string">Formatted invoice number, e.g. `2025-000001`.</ResponseField>
+    <ResponseField name="nit_ci" type="string">Taxpayer NIT or CI used on the invoice.</ResponseField>
+    <ResponseField name="razon_social" type="string">Legal name used on the invoice.</ResponseField>
+    <ResponseField name="subtotal" type="number">Order subtotal before tax.</ResponseField>
+    <ResponseField name="impuesto" type="number">Tax amount (currently `0`).</ResponseField>
+    <ResponseField name="total" type="number">Total amount on the invoice.</ResponseField>
+  </Expandable>
+</ResponseField>
+
+### Example — pay in cash, generate ticket and invoice
+
+```bash
+curl -X POST https://api.example.com/api/payments \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "pedido_id": 42,
+    "monto": 120.50,
+    "metodo": "efectivo",
+    "generar_ticket": true,
+    "generar_factura": true,
+    "nit_ci": "12345678",
+    "razon_social": "Empresa Ejemplo S.R.L."
+  }'
+```
+
+**Response `201 Created`:**
+
+```json
+{
+  "message": "Pago registrado",
+  "paymentId": 15,
+  "estado_pago": "pagado",
+  "totalPagado": 120.50,
+  "ticket": {
+    "id": 7,
+    "numero_ticket": "20250115-0001",
+    "numero_diario": 1,
+    "fecha": "2025-01-15"
+  },
+  "factura": {
+    "id": 4,
+    "numero_factura": "2025-000004",
+    "nit_ci": "12345678",
+    "razon_social": "Empresa Ejemplo S.R.L.",
+    "subtotal": 120.50,
+    "impuesto": 0,
+    "total": 120.50
+  }
+}
+```
+
+### Error responses
+
+| Status | Condition |
+|--------|-----------|
+| `400` | Missing `pedido_id`, `monto`, or `metodo` |
+| `400` | `metodo` is not one of `efectivo`, `tarjeta`, `qr`, `transferencia` |
+| `400` | `generar_factura: true` but `nit_ci` or `razon_social` not provided |
+| `404` | Order with the given `pedido_id` does not exist |
+| `500` | Database or internal error |
+
+---
+
+<Warning>
+  Payment records are permanent. There is no `DELETE /api/payments` endpoint. Once a payment is inserted it remains in the `pago` table as an immutable financial record. If a payment was entered in error, contact a system administrator to handle the correction at the database level.
+</Warning>
