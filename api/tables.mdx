@@ -4,7 +4,7 @@ sidebarTitle: "Tables"
 description: "CRUD endpoints for restaurant tables with status tracking. States: libre, ocupada, mantenimiento. Includes available tables query for reservation planning."
 ---
 
-The Tables API manages the physical tables in the restaurant. Each table tracks its current occupancy state, seating capacity, and whether it has an active order open today. Table states are updated automatically by the Orders API when orders are created or completed — staff can also update them manually through the PATCH endpoint. All endpoints require a valid JWT in the `Authorization: Bearer <token>` header.
+The Tables API manages the physical tables in the restaurant. Each table tracks its current occupancy state and seating capacity. Table states are updated automatically by the Orders API when orders are created or completed — staff can also update them manually through the PATCH endpoint. All endpoints require a valid JWT in the `Authorization: Bearer <token>` header.
 
 ---
 
@@ -33,11 +33,22 @@ The Tables API manages the physical tables in the restaurant. Each table tracks 
   - `ocupada` — table has an active order in progress.
   - `mantenimiento` — table is out of service.
 </ResponseField>
+
+<Note>
+  The `tiene_pedido_activo` boolean flag is only present on responses from `GET /api/tables`. It is **not** returned by `GET /api/tables/:id` or `GET /api/tables/disponibles`. See the [GET /api/tables](#get-apitables) section for details.
+</Note>
+
+---
+
+## GET /api/tables
+
+Returns all tables ordered by table number ascending. Each table object includes the computed `tiene_pedido_activo` flag indicating whether the table has an open order today.
+
 <ResponseField name="tiene_pedido_activo" type="boolean">
-  `true` when at least one order for this table has `estado_servicio` of `pendiente`, `preparando`, or `listo` and was created today. Computed at query time — not stored in the database.
+  `true` when at least one order for this table has `estado_servicio` of `pendiente`, `preparando`, or `listo` and was created today. Computed at query time — not stored in the database. Only present on the list response.
 </ResponseField>
 
-### Example table object
+### Example table object (list response)
 
 ```json
 {
@@ -49,12 +60,6 @@ The Tables API manages the physical tables in the restaurant. Each table tracks 
 }
 ```
 
----
-
-## GET /api/tables
-
-Returns all tables ordered by table number ascending, each decorated with the `tiene_pedido_activo` flag.
-
 ```bash
 curl https://your-api-host/api/tables \
   -H "Authorization: Bearer <token>"
@@ -64,7 +69,7 @@ curl https://your-api-host/api/tables \
 
 ## GET /api/tables/disponibles
 
-Returns only tables whose `estado` is currently `libre`. Useful for quickly building a table-picker UI for new orders or walk-in reservations.
+Returns only tables whose `estado` is currently `libre`. Useful for quickly building a table-picker UI for new orders or walk-in reservations. Response objects contain `id`, `numero`, `capacidad`, and `estado` — the `tiene_pedido_activo` flag is **not** included.
 
 ```bash
 curl https://your-api-host/api/tables/disponibles \
@@ -79,11 +84,20 @@ curl https://your-api-host/api/tables/disponibles \
 
 ## GET /api/tables/:id
 
-Returns a single table. Returns `404` if the table does not exist.
+Returns a single table by ID. The response contains `id`, `numero`, `capacidad`, and `estado`. The `tiene_pedido_activo` flag is **not** included in single-record responses. Returns `404` if the table does not exist.
 
 ```bash
 curl https://your-api-host/api/tables/3 \
   -H "Authorization: Bearer <token>"
+```
+
+```json
+{
+  "id": 3,
+  "numero": 3,
+  "capacidad": 4,
+  "estado": "ocupada"
+}
 ```
 
 ---

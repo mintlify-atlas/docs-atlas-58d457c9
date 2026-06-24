@@ -1,7 +1,7 @@
 ---
-title: "Audit Log API — Track All System Actions"
+title: "Audit Log API — Track All Restaurant System Actions"
 sidebarTitle: "Audit"
-description: "GET /api/audit retrieves the audit trail of all significant user actions including logins, order creation, payment processing, and report generation with timestamps and IP addresses."
+description: "Query and write the audit trail of system actions — logins, orders, payments, reports — with IP addresses and timestamps. Restricted to admin role."
 ---
 
 The Audit Log API exposes the `auditoria` table, which records every significant action performed in the system. Entries are written automatically by the `logAudit` utility function (`utils/auditLogger.js`) at the point of the originating operation — no separate step is required. Each entry captures who performed the action (`usuario_id`), what they did (`accion`), which table was affected (`tabla`), which record (`registro_id`), a plain-text description (`detalle`), and the request IP address (`direccion_ip`). This provides a complete, tamper-evident trail for compliance, debugging, and operational review. All read and write access to the audit log is restricted to the `admin` role.

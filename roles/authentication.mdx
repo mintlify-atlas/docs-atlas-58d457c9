@@ -1,5 +1,5 @@
 ---
-title: "Authenticate with SS Restaurant API"
+title: "SS Restaurant API: JWT Authentication and Token Usage"
 sidebarTitle: "Authentication"
 description: "Obtain a JWT token via POST /api/auth/login and pass it as a Bearer token in the Authorization header on all subsequent API requests."
 ---
@@ -191,7 +191,7 @@ Authorization: Bearer <token>
     ```
   </Step>
   <Step title="Handle expired or invalid tokens">
-    When the API returns a non-OK response, `apiFetch` inspects the status code. A `401` response automatically clears both `localStorage` keys and redirects the user to `/login`. Your components do not need to handle token expiry explicitly — the utility takes care of it.
+    When the API returns a non-OK response, `apiFetch` reads the response body as text and throws an `Error` regardless of status code. For `401` responses specifically, it also clears both `localStorage` keys (`token` and `user`) and redirects to `/login` before throwing. Non-`401` errors (including `403` from an expired token) are thrown directly without redirecting, so your component's `catch` block will receive them.
   </Step>
 </Steps>
 
@@ -248,12 +248,12 @@ Every successful login is written to the audit log via `logAudit` before the res
 
 | Field | Value |
 |-------|-------|
-| `user_id` | The authenticated user's `id` |
-| `action` | `LOGIN` |
+| `usuario_id` | The authenticated user's `id` |
+| `accion` | `LOGIN` |
 | `tabla` | `usuarios` |
 | `registro_id` | The user's `id` |
-| `descripcion` | `Inicio de sesion: <email>` |
-| `ip` | Client IP address (resolved via `req.ip`, with `trust proxy` enabled) |
+| `detalle` | `Inicio de sesion: <email>` |
+| `direccion_ip` | Client IP address (resolved via `req.ip`, with `trust proxy` enabled) |
 
 ```javascript
 // Backend/controllers/authController.js

@@ -1,7 +1,7 @@
 ---
 title: "Menu API — Products, Categories, and Image Uploads"
 sidebarTitle: "Menu"
-description: "Endpoints to list, create, update, and delete menu products and categories. Image upload via multipart form to ImageKit. Public menu returns only available items."
+description: "Manage menu products and categories. Upload images to ImageKit. Public endpoint serves available items; mutations require authentication and admin role."
 ---
 
 The Menu API manages the restaurant's product catalogue and categories. Products carry availability flags so the kitchen can toggle items on or off without deleting them. Images are hosted on ImageKit and referenced by URL. There are two access tiers: a **public** endpoint returns only available products and categories without authentication, while the **authenticated** endpoints expose the full catalogue and mutation operations.

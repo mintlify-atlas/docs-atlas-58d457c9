@@ -20,17 +20,17 @@ The state transitions to `ocupada` automatically when an order is created and ba
 
 ## Table management
 
-Full CRUD is available under `/api/tables`. All routes require authentication; deletion and creation require **admin** role.
+Full CRUD is available under `/api/tables`. All routes require authentication.
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/api/tables` | List all tables with live `tiene_pedido_activo` flag |
+| `GET` | `/api/tables` | List all tables |
 | `GET` | `/api/tables/disponibles` | List only tables with `estado = 'libre'` |
 | `GET` | `/api/tables/:id` | Get a single table |
-| `POST` | `/api/tables` | Create a table (admin) |
-| `PUT` | `/api/tables/:id` | Full update — number, capacity, and state (admin) |
+| `POST` | `/api/tables` | Create a table |
+| `PUT` | `/api/tables/:id` | Full update — number, capacity, and state |
 | `PATCH` | `/api/tables/:id/estado` | Status-only update |
-| `DELETE` | `/api/tables/:id` | Delete a table (admin) |
+| `DELETE` | `/api/tables/:id` | Delete a table |
 
 **Creating a table:**
 
@@ -103,14 +103,14 @@ Valid `estado` values: `libre`, `ocupada`, `mantenimiento`. Any other value retu
     ```
 
     <Note>
-      The reservation must be in `confirmada` or `pendiente` state. Attempting to convert a `cancelada` or `completada` reservation returns `400`.
+      The reservation must be in `confirmada` or `pendiente` state. Attempting to convert a `cancelada` or `completada` reservation returns `400`. This endpoint requires **admin**, **mesero**, or **cajero** role.
     </Note>
   </Step>
 </Steps>
 
 ## Public reservation endpoint
 
-The public endpoint is mounted at `/api/public/reservations` and requires **no authentication**. It is designed for embedding on the restaurant's website or a customer-facing booking widget.
+The public endpoint is mounted at `/api/public/reservations` and requires **no authentication**. It is designed for embedding on the restaurant's website or a customer-facing booking widget. When a reservation is submitted, a `cliente` record is created automatically using the provided `nombre` and `telefono`.
 
 ```json
 POST /api/public/reservations
@@ -130,8 +130,8 @@ Content-Type: application/json
 
 | Field | Required | Notes |
 |---|---|---|
-| `nombre` | ✅ | Used to create a `cliente` record |
-| `telefono` | ✅ | Used to create a `cliente` record |
+| `nombre` | ✅ | Used to create a `cliente` record automatically |
+| `telefono` | ✅ | Used to create a `cliente` record automatically |
 | `fecha_hora_inicio` | ✅ | ISO-like datetime string `YYYY-MM-DDTHH:mm` |
 | `fecha_hora_fin` | ✅ | ISO-like datetime string `YYYY-MM-DDTHH:mm` |
 | `cantidad_personas` | ✅ | Minimum seating required |

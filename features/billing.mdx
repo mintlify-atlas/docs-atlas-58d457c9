@@ -4,7 +4,7 @@ sidebarTitle: "Billing"
 description: "Process payments in four methods, automatically generate PDF tickets and tax invoices, and view daily payment summaries — all restricted to admin and cajero roles."
 ---
 
-SS Restaurant's billing system is built around three linked records: a **pago** (payment), an optional **ticket** (receipt), and an optional **factura** (tax invoice). A single `POST /api/payments` call can create all three atomically. The payment logic tracks partial payments — `estado_pago` on the order only becomes `'pagado'` when the cumulative amount received equals or exceeds the order total. Only **admin** and **cajero** roles can process payments; all authenticated users can read payment history.
+SS Restaurant's billing system is built around three linked records: a **pago** (payment), an optional **ticket** (receipt), and an optional **factura** (tax invoice). A single `POST /api/payments` call can create all three atomically. The payment logic tracks partial payments — `estado_pago` on the order only becomes `'pagado'` when the cumulative amount received equals or exceeds the order total. Only **admin** and **cajero** roles can access all payment, ticket, and invoice endpoints.
 
 ## Payment methods
 
@@ -172,8 +172,10 @@ Example: `2025-000009` is the ninth invoice issued in 2025.
 |---|---|---|
 | `GET` | `/api/invoices` | List all invoices (filter by `?fecha=YYYY-MM-DD`) |
 | `GET` | `/api/invoices/hoy` | List today's invoices |
+| `GET` | `/api/invoices/resumen` | Summary of today's invoices |
 | `GET` | `/api/invoices/:id` | Get an invoice with full order details |
 | `GET` | `/api/invoices/pedido/:pedido_id` | Get the invoice for a specific order |
+| `GET` | `/api/invoices/numero/:numero` | Look up an invoice by its number |
 | `POST` | `/api/invoices` | Manually generate a factura |
 
 **Manually generating a factura:**

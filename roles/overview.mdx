@@ -1,5 +1,5 @@
 ---
-title: "Role-Based Access Control in SS Restaurant"
+title: "SS Restaurant Role-Based Access Control (RBAC) Guide"
 sidebarTitle: "Roles Overview"
 description: "SS Restaurant enforces four roles — admin, cajero, mesero, and cocina — with per-route API restrictions and client-side navigation guards in Vue Router."
 ---
@@ -188,7 +188,7 @@ Each protected route declares its allowed roles in the `meta.roles` field:
 {
   path: "reservations",
   component: ReservationsView,
-  meta: { roles: ["admin", "cajero", "mesero"] }  // note: cajero has route access here
+  meta: { roles: ["admin", "cajero", "mesero"] }
 },
 {
   path: "reports",

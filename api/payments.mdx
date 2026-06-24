@@ -1,10 +1,10 @@
 ---
-title: "Payments API — Process and Query Order Payments"
+title: "Payments API — Process and Query Restaurant Payments"
 sidebarTitle: "Payments"
 description: "POST /api/payments processes a payment for an order, marks it as paid, and optionally generates a ticket or invoice. Restricted to admin and cajero roles."
 ---
 
-The Payments API records monetary transactions against existing orders. Each call to `POST /api/payments` inserts a row into the `pago` table, recalculates the running total paid for the order, and flips `estado_pago` to `pagado` once the cumulative amount meets or exceeds the order total. In the same atomic transaction the endpoint can optionally create a sale ticket (`ticket`) and a tax invoice (`factura`) so that a full cashier workflow requires only a single HTTP request. All write operations are restricted to the `admin` and `cajero` roles; read endpoints are accessible to any authenticated user.
+The Payments API records monetary transactions against existing orders. Each call to `POST /api/payments` inserts a row into the `pago` table, recalculates the running total paid for the order, and flips `estado_pago` to `pagado` once the cumulative amount meets or exceeds the order total. In the same atomic transaction the endpoint can optionally create a sale ticket (`ticket`) and a tax invoice (`factura`) so that a full cashier workflow requires only a single HTTP request. All endpoints — reads and writes — are restricted to the `admin` and `cajero` roles.
 
 ---
 
@@ -12,9 +12,9 @@ The Payments API records monetary transactions against existing orders. Each cal
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| `GET` | `/api/payments` | Any | List all payments, optionally filtered by order |
-| `GET` | `/api/payments/resumen-diario` | Any | Today's payment totals broken down by method |
-| `GET` | `/api/payments/:id` | Any | Get a single payment record by its ID |
+| `GET` | `/api/payments` | admin, cajero | List all payments, optionally filtered by order |
+| `GET` | `/api/payments/resumen-diario` | admin, cajero | Today's payment totals broken down by method |
+| `GET` | `/api/payments/:id` | admin, cajero | Get a single payment record by its ID |
 | `POST` | `/api/payments` | admin, cajero | Process a payment for an order |
 
 ---

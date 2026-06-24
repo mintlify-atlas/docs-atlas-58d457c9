@@ -1,5 +1,5 @@
 ---
-title: "Users API — Manage Restaurant Staff Accounts"
+title: "Users API — Create and Manage Staff User Accounts"
 sidebarTitle: "Users"
 description: "CRUD endpoints to create and manage staff user accounts with role assignments. Restricted to admin role. Passwords are hashed with bcryptjs before storage."
 ---
@@ -80,7 +80,7 @@ Creates a new staff account. The email address must be unique across all users. 
   Plain-text password. The API hashes it with bcryptjs (cost 10) before storing it. Minimum length is not enforced server-side but a strong password is recommended.
 </ParamField>
 
-<ParamField body="rol" type="string" required>
+<ParamField body="rol" type="string">
   Role assignment. Must be one of: `admin`, `cajero`, `mesero`, `cocina`. Defaults to `mesero` if omitted.
 
   | Role | Access level |
@@ -132,8 +132,6 @@ curl -X POST https://api.example.com/api/users \
 ## PUT /api/users/:id
 
 Updates the profile information of an existing user. `nombre` and `email` are required. If `email` is changed it must not conflict with another existing user's address.
-
-To change a user's password, include the `password` field in the request body. The controller will hash the new value before writing it.
 
 ### Request body
 

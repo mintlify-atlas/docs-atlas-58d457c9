@@ -55,6 +55,10 @@ Authenticate a user and receive a JWT. No prior authentication is required to ca
   </Expandable>
 </ResponseField>
 
+### Audit logging
+
+Every successful login is recorded in the system audit log. The server calls `logAudit` with the action `LOGIN` against the `usuarios` table, capturing the user ID, email, and client IP address. Failed login attempts are **not** logged.
+
 ### Error responses
 
 | Status | Condition |

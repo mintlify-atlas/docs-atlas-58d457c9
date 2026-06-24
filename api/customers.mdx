@@ -1,10 +1,10 @@
 ---
 title: "Customers API — Manage Restaurant Customer Records"
 sidebarTitle: "Customers"
-description: "CRUD endpoints for customer records. Customers are linked to orders and reservations. Accessible to admin, cajero, and mesero roles after authentication."
+description: "CRUD endpoints for customer records linked to orders and reservations. Search by name, phone, or email. Requires valid JWT; no specific role restriction."
 ---
 
-The Customers API manages the restaurant's guest directory. Customer records are linked to both orders and reservations, allowing staff to track visit history and personalise the dining experience. All endpoints require a valid JWT in the `Authorization: Bearer <token>` header and are accessible to users with the `admin`, `cajero`, or `mesero` roles.
+The Customers API manages the restaurant's guest directory. Customer records are linked to both orders and reservations, allowing staff to track visit history and personalise the dining experience. All endpoints require a valid JWT in the `Authorization: Bearer <token>` header. No additional role restriction is applied — any authenticated user may access these routes.
 
 ---
 
@@ -158,5 +158,5 @@ curl -X DELETE https://your-api-host/api/customers/24 \
 ## Automatic customer creation
 
 <Note>
-  When a booking is submitted through the public reservation endpoint (`POST /api/public/reservations`), the server automatically creates a customer record using the `nombre`, `telefono`, and `email` fields from the request. If a customer with that phone number already exists, a new record is still inserted — there is no de-duplication on the public path. Use `GET /api/customers?search=<phone>` to check for existing records before creating one manually.
+  When a booking is submitted through the public reservation endpoint (`POST /api/public/reservations`), the server always creates a new customer record using the `nombre`, `telefono`, and `email` fields from the request. No de-duplication is performed — if a customer with that phone number already exists, a second record is inserted. Use `GET /api/customers?search=<phone>` to check for existing records before creating one manually.
 </Note>

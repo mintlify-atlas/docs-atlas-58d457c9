@@ -116,7 +116,7 @@ Constraints enforced by the server:
 
 - Only MIME types starting with `image/` are accepted.
 - Maximum file size: **3 MB**.
-- The frontend automatically resizes images to a maximum of 800 × 600 px at 80 % JPEG quality before uploading.
+- The multer field name must be `image` (case-sensitive).
 
 **Response (201):**
 
@@ -171,11 +171,7 @@ This endpoint returns **only products with `disponible = true`** along with the 
 
 ```json
 {
-  "categorias": [
-    { "id": 1, "nombre": "Entradas" },
-    { "id": 2, "nombre": "Platos de fondo" }
-  ],
-  "productos": [
+  "products": [
     {
       "id": 12,
       "categoria_id": 2,
@@ -187,6 +183,10 @@ This endpoint returns **only products with `disponible = true`** along with the 
       "disponible": true,
       "creado_en": "2025-01-15T14:32:00.000Z"
     }
+  ],
+  "categories": [
+    { "id": 1, "nombre": "Entradas" },
+    { "id": 2, "nombre": "Platos de fondo" }
   ]
 }
 ```

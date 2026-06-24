@@ -1,10 +1,10 @@
 ---
 title: "Get SS Restaurant Running Locally in 5 Minutes"
 sidebarTitle: "Quickstart"
-description: "Install dependencies, configure your MySQL database, seed sample data, and launch both the Express API and Vue 3 frontend with a working login."
+description: "Install dependencies, configure your MySQL database, seed sample data, and launch both the Express API and Vue 3 frontend ready for first use."
 ---
 
-This guide walks you from a fresh clone to a fully operational SS Restaurant instance — backend API, MySQL database, sample data, and Vue 3 frontend — in a single terminal session. By the end you will have a working admin login and a seeded menu you can start exploring immediately.
+This guide walks you from a fresh clone to a fully operational SS Restaurant instance — backend API, MySQL database, sample data, and Vue 3 frontend — in a single terminal session. By the end you will have the API running, the database seeded with sample menu items, tables, and customers, and the frontend ready to log in once you create your first admin user.
 
 ## Prerequisites
 
@@ -128,16 +128,34 @@ Before you begin, make sure the following are available on your machine:
     The Vite dev server is configured to proxy all `/api` requests to `http://localhost:3000`, so the frontend communicates with your local Express API automatically.
   </Step>
 
-  <Step title="Log in with the seeded admin account">
-    Open your browser and go to:
+  <Step title="Create your first admin user">
+    The seed script does **not** create any user accounts — it only populates menu categories, products, tables, and customers. Before you can log in you must insert an initial admin user directly in MySQL with a bcrypt-hashed password.
 
+    Connect to MySQL and run:
+
+    ```sql
+    INSERT INTO usuarios (nombre, apellido, email, password_hash, rol, activo)
+    VALUES (
+      'Admin',
+      'User',
+      'admin@example.com',
+      '$2a$10$placeholder_replace_with_real_hash',
+      'admin',
+      1
+    );
     ```
-    http://localhost:5173/login
+
+    To generate a proper bcrypt hash for your chosen password, run this one-liner from the `Backend/` directory:
+
+    ```bash
+    node -e "const b=require('bcryptjs');b.hash('your_password',10).then(h=>console.log(h))"
     ```
 
-    Use the admin credentials that were inserted alongside your database schema (typically created during initial setup with a hashed password via `bcryptjs`). After a successful login the API returns a JWT valid for **8 hours**, which the frontend stores in `localStorage` and attaches to every subsequent request via the `Authorization: Bearer` header.
+    Copy the printed hash and use it as the `password_hash` value in the INSERT statement above.
 
-    Once logged in you will land on the dashboard where you can see sales metrics, active orders, and table status.
+    Once the user row exists, open your browser, go to `http://localhost:5173/login`, and sign in with the email and password you chose. After a successful login the API returns a JWT valid for **8 hours**, which the frontend stores in `localStorage` and attaches to every subsequent request via the `Authorization: Bearer` header.
+
+    Alternatively, if you already have a logged-in admin session, subsequent staff accounts can be created through the application UI or by calling `POST /api/users` (admin role required).
   </Step>
 
 </Steps>

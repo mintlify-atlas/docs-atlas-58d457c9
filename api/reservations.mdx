@@ -1,7 +1,7 @@
 ---
 title: "Reservations API — Manage and Convert Table Reservations"
 sidebarTitle: "Reservations"
-description: "Endpoints to create, update, and confirm reservations, check table availability by time window, and convert confirmed reservations directly into active orders."
+description: "Manage table reservations: create, confirm, check availability by time window, and convert bookings into active orders. Includes a public booking route."
 ---
 
 The Reservations API handles the full lifecycle of a table booking: walk-in and online creation, staff confirmation, availability queries, and one-click conversion to an active order. The system automatically marks overdue reservations as `no_asistio` whenever the reservation list is fetched. There are two route groups — a **public** route that requires no authentication (for customer-facing booking forms) and a set of **authenticated** routes for restaurant staff.
@@ -32,7 +32,7 @@ The Reservations API handles the full lifecycle of a table booking: walk-in and 
 
 ### POST /api/public/reservations
 
-Accepts a booking request from a customer without requiring an account. The server automatically creates or reuses a customer record and assigns the most suitable available table if `mesa_id` is not specified.
+Accepts a booking request from a customer without requiring an account. The server always creates a new customer record from the supplied contact details and assigns the most suitable available table if `mesa_id` is not specified. No de-duplication is performed on the customer data.
 
 **`POST /api/public/reservations`**
 
